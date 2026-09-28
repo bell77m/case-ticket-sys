@@ -128,7 +128,8 @@ export type QueuePage = { items: QueueItem[]; total: number; page: number; page_
 export const getQueue = (params: URLSearchParams) => call<QueuePage>(`/api/staff/tickets?${params}`);
 
 // Realtime (FR-P3): `new EventSource('/api/events')` gets an `event: ticket` with this data whenever a ticket
-// changes. It carries no ticket content; refetch through the endpoints above.
+// changes. It carries no ticket content; refetch through the endpoints above. id 0 (sent by live.svelte.ts after a
+// dropped stream reconnects) means any ticket may have changed.
 export type TicketEvent = { type: 'ticket'; id: number };
 
 // Staff ticket detail (T1.19). Evidence URLs need no header: the session cookie goes along.

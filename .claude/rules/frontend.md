@@ -15,3 +15,4 @@ paths:
 - Paraglide options live in two places: `paraglideVitePlugin` in vite.config.ts and the `check` script in package.json. Change both together.
 - Links and GET forms that must leave the SPA need `data-sveltekit-reload`; otherwise the SvelteKit router handles them and shows its 404 page.
 - e2e: a sign-in or save done with `fetch` has no navigation to wait for. Wait for its response (see `signIn` in e2e/helpers.ts) before `page.goto`, or the navigation cancels the request.
+- e2e: `page.goto` resolves before the SPA's load function has fetched its data. When a test changes data and expects the page to pick it up later (live refresh, reload), first wait for the page's own API response (`page.waitForResponse`, set up before `goto`), or the first load may already include the change and the test proves nothing. Check such a test fails with the feature switched off.

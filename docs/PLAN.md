@@ -227,9 +227,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - KPI cards linking to the filtered queue, written summary, Chart.js graphs with DESIGN.md colors, Show as table, filter pills.
     - Done when: layout matches DESIGN.md breakpoints and every graph has a table view.
     - Status: done. /staff/reports (report.view) shows the filter row, 7 summary cards (5 linked to the queue), the written summary and 7 Chart.js 4.5.1 graphs in validated token colors, each with a "Show as table" twin; e2e checks the 1/2-column breakpoints and 320px. See [note](notes/T3.03.md).
-- [ ] **T3.04** Realtime updates — M · deps: T2.04, T3.03 · be + fe · FR-P3
+- [x] **T3.04** Realtime updates — M · deps: T2.04, T3.03 · be + fe · FR-P3
     - Publish ticket changes to Redis; `GET /api/events` SSE per pod; frontend EventSource refreshes queue and dashboard.
     - Done when: a change in one browser shows in another within 2 seconds, with 2 app instances running.
+    - Status: done. Every ticket change publishes `{type, id}` to Redis after commit and `GET /api/events` (ticket.view_all, re-checked each 25 s heartbeat) streams it from any pod; the queue, dashboard and ticket detail refetch within about 1 s (31 ms across two instances in the Go test), and catch up after a dropped stream. See [note](notes/T3.04.md).
 - [ ] **T3.05** PDF export — M · deps: T3.03 · be + fe · FR-P4
     - Print page, 60-second one-time token, Gotenberg call, `tickets-report-YYYY-MM-DD.pdf`, `report.exported` audited.
     - Done when: exported PDF shows charts and Burmese and Thai text correctly.

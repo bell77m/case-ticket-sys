@@ -69,7 +69,7 @@
 		await invalidate('app:ticket');
 		if (!dirty) base = t;
 	});
-	onMount(() => onTicketEvent((e) => e.id === ticketId && refresh()));
+	onMount(() => onTicketEvent((e) => (e.id === ticketId || e.id === 0) && refresh()));
 
 	let replyMode = $state<'public' | 'internal'>('public');
 	let reply = $state('');

@@ -13,7 +13,7 @@
 | Migrations | goose | Versioned SQL files |
 | Database | PostgreSQL 16 | `pg_trgm` for multilingual search |
 | Cache / queue | Redis 7, go-redis | Sessions, rate limits, pub/sub for SSE |
-| Realtime | Server-Sent Events + Redis pub/sub | `/api/events` |
+| Realtime | Server-Sent Events + Redis pub/sub | `/api/events` (ticket.view_all). Package `internal/events`: every ticket change publishes `{type, id}` on Redis channel `ticket-events` after commit (no content); each SSE client subscribes, gets a `: ping` every 25 s and is re-authorized at each ping. Clients refetch through the normal endpoints. |
 | PDF | Gotenberg (headless Chromium) | Renders the report print page |
 | Auth | Username and password, PBKDF2-SHA256 (Go standard library) | Staff only; no SSO; session ID in HttpOnly cookie, data in Redis |
 | Notifications | In-app only | Staff see new and assigned tickets in the queue; no email (decided 2026-09-24) |
