@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+backend/bin/
+backend/web/dist/*
+!backend/web/dist/README.txt
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+
+# Tool state
+.remember/
+.codegraph/
+*.exe
+
+# Playwright output
+frontend/test-results/
+frontend/playwright-report/

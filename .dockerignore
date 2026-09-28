@@ -1,0 +1,13 @@
+**/node_modules
+frontend/.svelte-kit
+frontend/build
+frontend/src/lib/paraglide
+backend/bin
+backend/web/dist
+.env
+.env.*
+!.env.example
+.git
+.remember
+.codegraph
+*.exe

@@ -1,0 +1,113 @@
+# Architecture
+
+## Tech stack
+
+| Need | Choice | Notes |
+| --- | --- | --- |
+| Frontend | SvelteKit, adapter-static (SPA) | Built to static files, embedded in the Go binary with `embed` |
+| Styling | CSS custom properties from [DESIGN.md](../DESIGN.md) + Svelte scoped styles | No CSS framework |
+| Charts | Chart.js | |
+| i18n | Paraglide JS | `messages/{en,zh-CN,my,th}.json` |
+| Backend | Go, stdlib `net/http` (1.22+ routing) | No web framework |
+| ORM | GORM + PostgreSQL driver (pgx) | AutoMigrate off in production |
+| Migrations | goose | Versioned SQL files |
+| Database | PostgreSQL 16 | `pg_trgm` for multilingual search |
+| Cache / queue | Redis 7, go-redis | Sessions, rate limits, pub/sub for SSE |
+| Realtime | Server-Sent Events + Redis pub/sub | `/api/events` |
+| PDF | Gotenberg (headless Chromium) | Renders the report print page |
+| Auth | Username and password, PBKDF2-SHA256 (Go standard library) | Staff only; no SSO; session ID in HttpOnly cookie, data in Redis |
+| Notifications | In-app only | Staff see new and assigned tickets in the queue; no email (decided 2026-09-24) |
+| Secrets | HashiCorp Vault + Vault Secrets Operator | App reads env vars; no Vault code in app |
+
+## Data model
+
+| Table | Key columns |
+| --- | --- |
+| staff | id, name, username, password_hash, must_change_password, password_changed_at, role_id, language, is_active |
+| roles | id, name |
+| role_permissions | role_id, permission |
+| tickets | id, summary, case_details, category_id, priority (null until triage), status, guest_name, employee_id, language, location_id, access_token_hash, assignee_id, first_response_at, resolved_at, created_at, updated_at |
+| comments | id, ticket_id, author_staff_id (null = guest), body, is_internal, created_at |
+| attachments | id, ticket_id, file_path, media_type (image/video), size_bytes, uploaded_by_staff_id (null = guest), created_at |
+| audit_log | id, actor_type (staff, guest or system), actor_staff_id (set only for staff), action, ticket_id (nullable, no foreign key so entries outlive deleted tickets), target, from_value, to_value, ip_address, created_at |
+| locations | id, building, floor, line (each JSONB: en, zh-CN, my, th), is_active; unique (building, floor, line) |
+| categories | id, name (JSONB: en, zh-CN, my, th), is_active |
+
+Indexes: tickets(status), tickets(created_at), tickets(location_id), trigram index on tickets(case_details).
+
+## Deployment
+
+Ubuntu Server 24.04 LTS, k3s (installed with `--disable traefik`). Namespaces: `ticket-staging`, `ticket-prod`.
+
+```mermaid
+flowchart LR
+    U[Browser] -->|HTTPS 443| X[NGINX Ingress]
+    X --> A[ticket-app<br/>2 pods]
+    A --> P[(PostgreSQL<br/>StatefulSet)]
+    A --> R[(Redis)]
+    A --> V[Uploads<br/>PersistentVolume]
+    A --> G[Gotenberg<br/>PDF]
+    H[Vault] -->|secrets via VSO| A
+    B[Backup CronJob] --> P
+    B --> N[NFS share]
+```
+
+| Component | Setup |
+| --- | --- |
+| Docker image | Multi-stage: Node builds SvelteKit → Go builds static binary → distroless (~20 MB) |
+| Registry | Harbor (internal) |
+| ticket-app | Deployment, 2 replicas, `/healthz` probes, rolling updates |
+| PostgreSQL | StatefulSet + PV; CloudNativePG later if failover needed |
+| Migrations | goose Job as Argo CD PreSync hook |
+| Uploads | PV, start 200 GB; NFS (ReadWriteMany) when multi-node |
+| NGINX | F5 NGINX Ingress Controller (community ingress-nginx retired March 2026 — verify); `client_max_body_size 100m`; allow/deny company network; `proxy_buffering off` + 1 h read timeout on `/api/events` |
+| Redis | 1 replica, password from Vault, `appendonly yes` on small PV |
+| Gotenberg | 1 replica, ClusterIP only, ~512 MB memory |
+| Vault | hashicorp/vault Helm chart, Raft storage, 1 pod (3 for HA); Kubernetes auth; file audit device; Shamir unseal 3 of 5 |
+| TLS | Company CA cert as Ingress Secret, or cert-manager / Vault PKI |
+| Backups | Nightly CronJob: pg_dump + uploads → NFS |
+| Manifests | Kustomize, in GitOps repo watched by Argo CD |
+| Firewall (ufw) | 443 open to users; 6443 admins only |
+
+## CI/CD and DevSecOps
+
+GitHub Actions builds and scans (.github/workflows/ci.yml). Argo CD deploys by pulling from the GitOps repo, so CI never holds cluster credentials.
+
+```mermaid
+flowchart LR
+    C[Merge request] --> L[Lint + test]
+    L --> S[Security scans]
+    S --> B[Build, SBOM,<br/>scan, sign image]
+    B --> H[Harbor]
+    H --> G[GitOps repo]
+    G --> A[Argo CD]
+    A --> ST[Staging]
+    ST --> Z[ZAP scan]
+    Z --> M[Manual approval]
+    M --> P[Production]
+```
+
+| Stage | Tools | Fails when |
+| --- | --- | --- |
+| Lint | gofmt, golangci-lint, svelte-check | Any error |
+| Unit tests | `go test -race -coverpkg=./...` against PostgreSQL and Redis service containers | Test fails or Go coverage < 70% |
+| i18n check | Script comparing message keys | Any language missing a key from en.json |
+| Secret scan | Gitleaks | Secret in code or history |
+| SAST | Semgrep | High-severity finding |
+| Dependencies | govulncheck, Trivy fs | Known vuln with fix available |
+| IaC | Trivy config, kube-linter | Root, no limits, privileged |
+| Build | Docker Buildx | Build error |
+| SBOM | Syft (CycloneDX) | — |
+| Image scan | Trivy image | HIGH/CRITICAL with fix |
+| Sign | Cosign (key in Vault) | Signing fails |
+| DAST | OWASP ZAP baseline on staging | High-risk alert |
+
+Release flow:
+
+- `main` protected; pull request needs passing checks + 1 approval.
+- Merge to `main` → staging automatically.
+- Tag `vX.Y.Z` → production after manual approval in Argo CD.
+- Rollback: revert image tag in GitOps repo.
+- CI gets secrets from Vault via GitHub Actions OIDC tokens (JWT auth).
+- Kyverno: only Cosign-signed Harbor images, no root, CPU/memory limits required.
+- Harbor nightly rescan; Renovate weekly update pull requests.

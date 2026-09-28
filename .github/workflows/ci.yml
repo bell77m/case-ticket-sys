@@ -1,0 +1,128 @@
+# CI part 1 (T1.21): lint, tests with a coverage gate, i18n check and security scans on every pull request.
+# Build, sign and deploy steps come in T3.15. Tool versions are pinned; Renovate proposes updates.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ticket
+          POSTGRES_PASSWORD: ticket # throwaway CI database, same as docker-compose.yml
+          POSTGRES_DB: ticket
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ticket -d ticket"
+          --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-retries 10
+    env:
+      MIGRATE_DATABASE_URL: postgres://ticket:ticket@localhost:5432/ticket?sslmode=disable
+      DATABASE_URL: postgres://ticket_app:ticket_app@localhost:5432/ticket?sslmode=disable
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Prepare database (app user, migrations, dev seed)
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f deploy/dev/init-app-user.sql
+          go install github.com/pressly/goose/v3/cmd/goose@v3.28.0
+          goose -dir backend/migrations postgres "$MIGRATE_DATABASE_URL" up
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f backend/seed/dev.sql
+
+      # -coverpkg counts code in every package, so auth code exercised by the api tests is included.
+      - name: Go tests (race detector, coverage gate 70%)
+        working-directory: backend
+        run: |
+          go test -race -coverpkg=./... -coverprofile=cover.out ./...
+          total=$(go tool cover -func=cover.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+          echo "Go coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit !(t >= 70) }' || { echo "::error::Go coverage ${total}% is below 70%"; exit 1; }
+
+      - name: i18n key check
+        run: node scripts/check-i18n.mjs
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: gofmt
+        working-directory: backend
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+          working-directory: backend
+      - name: svelte-check
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check
+
+  security:
+    name: Security scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Gitleaks scans the whole history, not only the last commit
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Gitleaks (secrets in code or history)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git /repo --redact --verbose
+
+      - name: Semgrep (fails on high severity)
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:1.95.0
+          semgrep scan --config p/default --severity ERROR --error --metrics off
+          --exclude frontend/src/lib/paraglide
+
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
+
+      - name: Trivy filesystem scan (known vulnerabilities with a fix)
+        run: >
+          docker run --rm -v "$PWD:/src" ghcr.io/aquasecurity/trivy:0.58.1
+          fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src

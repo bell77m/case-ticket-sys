@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "postgres-dev": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "${DEV_DATABASE_URL:-postgres://ticket:ticket@localhost:5432/ticket?sslmode=disable}"]
+    }
+  }
+}
