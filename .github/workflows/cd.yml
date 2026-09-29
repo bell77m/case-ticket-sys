@@ -1,0 +1,116 @@
+# CD (T3.15, interim): after CI passes on a push to main, build the app and migration images, scan them, push them
+# to GHCR, sign them and point the staging overlay at the new digests. Argo CD (T3.14) syncs staging from there.
+# Interim until the platform exists: GHCR instead of Harbor (T3.12: change REGISTRY and the login), keyless Cosign
+# with GitHub's OIDC identity, the GitHub token instead of Vault JWT auth (T3.11), no ZAP scan until staging is up.
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One release at a time, in order; a newer merge waits instead of cancelling a half-pushed release.
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: Build, scan, sign, deploy to staging
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # commit the new digests to deploy/overlays/staging
+      packages: write # push to GHCR
+      id-token: write # Cosign keyless signing
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Image names
+        run: |
+          base="${REGISTRY}/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "APP=${base}/ticket-app"
+            echo "MIGRATE=${base}/ticket-migrate"
+            echo "TAG=sha-${SHA::12}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build both images from this commit
+        run: |
+          docker build -t "$APP:$TAG" .
+          docker build -f deploy/migrate.Dockerfile -t "$MIGRATE:$TAG" .
+
+      # Before pushing: a HIGH or CRITICAL finding with a fix available stops the release.
+      - name: Trivy image scan
+        run: |
+          for img in "$APP:$TAG" "$MIGRATE:$TAG"; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.58.1 \
+              image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$img"
+          done
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push and read the digests
+        run: |
+          docker push "$APP:$TAG"
+          docker push "$MIGRATE:$TAG"
+          echo "APP_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$APP:$TAG")" >> "$GITHUB_ENV"
+          echo "MIGRATE_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$MIGRATE:$TAG")" >> "$GITHUB_ENV"
+
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.APP_REF }}
+          format: spdx-json
+          output-file: sbom-app.spdx.json
+          upload-artifact: false
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.MIGRATE_REF }}
+          format: spdx-json
+          output-file: sbom-migrate.spdx.json
+          upload-artifact: false
+
+      # Keyless: the signature names this repository's workflow as the signer (for Kyverno, T3.12).
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the images and attach the SBOMs
+        run: |
+          cosign sign --yes "$APP_REF"
+          cosign sign --yes "$MIGRATE_REF"
+          cosign attest --yes --type spdxjson --predicate sbom-app.spdx.json "$APP_REF"
+          cosign attest --yes --type spdxjson --predicate sbom-migrate.spdx.json "$MIGRATE_REF"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ env.TAG }}
+          path: sbom-*.spdx.json
+          retention-days: 90
+
+      # By digest, so staging runs exactly the signed image. The token's push starts no new workflow run, and
+      # [skip ci] says so to anyone reading the history.
+      - name: Point staging at the new images
+        run: |
+          git fetch origin main
+          git checkout -B release origin/main
+          yq -i '(.images[] | select(.name == "ticket-app")) |= (.newName = (env(APP_REF) | split("@") | .[0]) | .digest = (env(APP_REF) | split("@") | .[1]) | del(.newTag))' deploy/overlays/staging/kustomization.yaml
+          yq -i '(.images[] | select(.name == "ticket-migrate")) |= (.newName = (env(MIGRATE_REF) | split("@") | .[0]) | .digest = (env(MIGRATE_REF) | split("@") | .[1]) | del(.newTag))' deploy/overlays/staging/kustomization.yaml
+          if git diff --quiet; then echo "staging already runs these images"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "deploy(staging): ticket-app ${TAG} [skip ci]"
+          git push origin release:main

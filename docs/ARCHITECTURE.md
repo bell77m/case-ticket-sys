@@ -72,7 +72,9 @@ flowchart LR
 
 ## CI/CD and DevSecOps
 
-GitHub Actions builds and scans (.github/workflows/ci.yml). Argo CD deploys by pulling from the GitOps repo, so CI never holds cluster credentials.
+GitHub Actions checks every pull request and push (.github/workflows/ci.yml); after CI passes on `main`, .github/workflows/cd.yml builds, scans, signs and pushes the images and commits their digests to the staging overlay. Argo CD deploys by pulling those manifests, so CI never holds cluster credentials.
+
+Interim, until the platform exists (2026-09-28): images go to GHCR instead of Harbor, Cosign signs keyless with the workflow's GitHub OIDC identity instead of a key in Vault, the GitHub token replaces Vault JWT auth, the staging digests live in this repo's `deploy/overlays/staging` instead of a separate GitOps repo, and there is no ZAP stage until staging is up.
 
 ```mermaid
 flowchart LR
@@ -93,14 +95,15 @@ flowchart LR
 | Lint | gofmt, golangci-lint, svelte-check | Any error |
 | Unit tests | `go test -race -coverpkg=./...` against PostgreSQL and Redis service containers | Test fails or Go coverage < 70% |
 | i18n check | Script comparing message keys | Any language missing a key from en.json |
+| End-to-end | Playwright (Edge) against the Go binary serving the built SPA, with Gotenberg; one retry | A test fails twice |
 | Secret scan | Gitleaks | Secret in code or history |
 | SAST | Semgrep | High-severity finding |
 | Dependencies | govulncheck, Trivy fs | Known vuln with fix available |
 | IaC | Trivy config, kube-linter | Root, no limits, privileged |
 | Build | Docker Buildx | Build error |
-| SBOM | Syft (CycloneDX) | — |
-| Image scan | Trivy image | HIGH/CRITICAL with fix |
-| Sign | Cosign (key in Vault) | Signing fails |
+| SBOM | Syft (SPDX JSON, attached to the image as a Cosign attestation) | — |
+| Image scan | Trivy image, before the push | HIGH/CRITICAL with fix |
+| Sign | Cosign (interim: keyless, GitHub OIDC; later key in Vault) | Signing fails |
 | DAST | OWASP ZAP baseline on staging | High-risk alert |
 
 Release flow:

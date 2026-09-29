@@ -1,12 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { axeBothSizes, devPassword, guestTicket, signIn } from './helpers';
+import { baseURL, axeBothSizes, devPassword, guestTicket, signIn } from './helpers';
 
 // T3.06 (FR-L1, FR-I6, FR-P4): the activity log needs audit.view. Done when an Agent gets 403 and a Team Lead sees
 // the log. No Team Lead is seeded, so root adds one through the API for this file and deactivates it at the end.
 
 const msg = (locale: string, key: string) => JSON.parse(readFileSync(`messages/${locale}.json`, 'utf8'))[key] as string;
-const baseURL = 'http://localhost:5173';
+// baseURL comes from helpers.ts
 const stamp = Date.now();
 const lead = { id: 0, username: `e2e-lead-${stamp}`, name: `E2E Lead ${stamp}`, password: 'e2e-own-password-1' };
 let root: APIRequestContext;
@@ -87,7 +87,11 @@ test('filters by action and by ticket, keep them in the URL, and page through th
 	await openAsLead(page);
 	expect((await page.request.patch(`/api/staff/tickets/${id}`, { data: { priority: 'high' } })).ok()).toBe(true);
 
-	// Pages: newest first, 50 per page. The dev DB holds far more than 50 rows.
+	// Pages: newest first, 50 per page. A fresh database (CI) can hold fewer rows, so open guest tickets until the log
+	// has a second page (each writes one ticket.created row); the long-lived dev DB needs none.
+	const { total } = await (await page.request.get('/api/staff/activity')).json();
+	for (let i = total; i <= 50; i++) await guestTicket(request, `Paging filler ${i}: the badge reader beeps twice.`);
+	if (total <= 50) await page.reload();
 	await expect(page.getByText(/^Page 1 of \d+$/)).toBeVisible();
 	await page.getByRole('button', { name: 'Next' }).click();
 	await expect(page).toHaveURL(/page=2/);

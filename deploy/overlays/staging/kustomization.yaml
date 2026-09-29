@@ -5,8 +5,8 @@ namespace: ticket-staging
 resources:
   - ../../base
 images:
-  # CI (T3.15) sets newTag; both images are built from the same commit and share the tag.
-  # Placeholder Harbor host until T3.12 names the project.
+  # .github/workflows/cd.yml replaces these after each green CI run on main: newName and the signed image's digest
+  # (both images from the same commit). Interim registry GHCR; Harbor once T3.12 names the project.
   - name: ticket-app
     newName: harbor.example.internal/ticket/ticket-app
     newTag: v0.1.0

@@ -9,15 +9,22 @@ const env = Object.fromEntries(
 		.map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])
 );
 
+// E2E_BASE_URL (CI): test an app that is already running, such as the Go binary serving the built SPA on :8080.
+// Unset (local): start the Go API and Vite below and test through Vite on :5173.
+const external = process.env.E2E_BASE_URL;
+
 // Needs the compose DB migrated and seeded (make migrate seed). Uses the installed Edge, no browser download.
 export default defineConfig({
 	testDir: 'e2e',
+	// CI: one retry, so a timing-sensitive test under full-suite load (live.spec's 2 s budget, Gotenberg prints)
+	// shows as "flaky" in the report instead of failing the build. Locally a failure fails at once.
+	retries: process.env.CI ? 1 : 0,
 	// The first page load after starting Vite compiles dependencies and can take several seconds.
 	expect: { timeout: 10_000 },
 	// Reduced motion: no entrance animations, so axe and screenshots see finished pages.
-	use: { baseURL: 'http://localhost:5173', channel: 'msedge', contextOptions: { reducedMotion: 'reduce' } },
+	use: { baseURL: external ?? 'http://localhost:5173', channel: 'msedge', contextOptions: { reducedMotion: 'reduce' } },
 	projects: [{ name: 'phone', use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: false } }],
-	webServer: [
+	webServer: external ? [] : [
 		// e2e opens about 14 tickets per run from localhost, over the guest limit of 5 per 10 minutes (NFR-3).
 		// PDF export (FR-P4): the Makefile's defaults, which .env.example does not carry.
 		{

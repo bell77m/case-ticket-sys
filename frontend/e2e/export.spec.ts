@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { axeViolations, guestTicket, signIn, ticketForEveryGraph } from './helpers';
+import { baseURL, axeViolations, guestTicket, signIn, ticketForEveryGraph } from './helpers';
 
 // T3.05 (FR-P4, FR-I6): Export PDF prints the dashboard through the real Gotenberg (docker compose up) in the viewer's
 // language. The PDFs stay in test-results/ for a person to look at.
@@ -9,7 +9,7 @@ const msg = (locale: string, key: string) => JSON.parse(readFileSync(`messages/$
 
 /** Exports the dashboard in `locale`, saves the PDF as test-results/export-<locale>.pdf and returns its bytes as latin1 text. */
 async function exportPdf(page: Page, locale: string) {
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 	await page.goto('/staff/reports');
 	await expect(page.locator('canvas')).toHaveCount(7);
 
@@ -52,7 +52,7 @@ test('Export PDF on the activity log downloads it in Thai with the Thai font', a
 	const { id } = await guestTicket(request, 'The handheld scanner battery does not charge.'); // a filter with one row
 	await signIn(page, 'root');
 	await expect(page).toHaveURL(/\/staff$/);
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'th', url: 'http://localhost:5173' }]);
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'th', url: baseURL }]);
 	await page.goto(`/staff/admin/activity?ticket=${id}`);
 	await expect(page.locator('ul.cards > li')).toHaveCount(1);
 
@@ -85,7 +85,8 @@ test('the print page without a valid token says the link expired, throws, then s
 test('Gotenberg refuses to print a failed print page, so no PDF comes out', async ({ request }) => {
 	// What the API sends (export.go), for a token that does not exist. The API turns any non-200 into 502 pdf.failed.
 	const gotenberg = process.env.GOTENBERG_URL || 'http://localhost:3000';
-	const base = process.env.PRINT_BASE_URL || 'http://host.docker.internal:5173';
+	// Gotenberg's container reaches the app under test through Docker's host alias (Vite locally, :8080 in CI).
+	const base = process.env.PRINT_BASE_URL || baseURL.replace('localhost', 'host.docker.internal');
 	const res = await request.post(`${gotenberg}/forms/chromium/convert/url`, {
 		multipart: { url: `${base}/print/report#bogus`, waitForExpression: 'window.printReady === true', failOnConsoleExceptions: 'true' },
 		timeout: 30_000

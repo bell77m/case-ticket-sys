@@ -1,5 +1,6 @@
-# CI part 1 (T1.21): lint, tests with a coverage gate, i18n check and security scans on every pull request.
-# Build, sign and deploy steps come in T3.15. Tool versions are pinned; Renovate proposes updates.
+# CI part 1 (T1.21): lint, tests with a coverage gate, i18n check, end-to-end tests and security scans on every
+# pull request and push to main. Build, sign and deploy: cd.yml, after this workflow passes on main.
+# Tool versions are pinned; Renovate proposes updates.
 name: CI
 
 on:
@@ -68,6 +69,89 @@ jobs:
       - name: i18n key check
         run: node scripts/check-i18n.mjs
 
+  # The whole Playwright suite against the production shape: the Go binary serving the built SPA on :8080.
+  # The build keeps /dev/components (VITE_SHOW_DEV_PAGES) because summary.spec uses it; the release image does not.
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ticket
+          POSTGRES_PASSWORD: ticket # throwaway CI database, same as docker-compose.yml
+          POSTGRES_DB: ticket
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ticket -d ticket"
+          --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-retries 10
+    env:
+      MIGRATE_DATABASE_URL: postgres://ticket:ticket@localhost:5432/ticket?sslmode=disable
+      E2E_BASE_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Not a service: Gotenberg's Chromium must reach the app on the runner (PRINT_BASE_URL, FR-P4).
+      - name: Start Gotenberg
+        run: |
+          docker run -d --name gotenberg --add-host host.docker.internal:host-gateway -p 3000:3000 gotenberg/gotenberg:8
+          timeout 60 sh -c 'until curl -sf http://localhost:3000/health >/dev/null; do sleep 2; done'
+
+      - name: Prepare database (app user, migrations, dev seed)
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f deploy/dev/init-app-user.sql
+          go install github.com/pressly/goose/v3/cmd/goose@v3.28.0
+          goose -dir backend/migrations postgres "$MIGRATE_DATABASE_URL" up
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f backend/seed/dev.sql
+
+      - name: Build the app (SPA embedded in the Go binary)
+        run: |
+          cd frontend && npm ci && VITE_SHOW_DEV_PAGES=1 npm run build && cd ..
+          find backend/web/dist -mindepth 1 ! -name README.txt -delete && cp -r frontend/build/. backend/web/dist/
+          cd backend && go build -o bin/ticket-app ./cmd/ticket-app
+
+      # The same settings `make dev` uses (.env.example), with the e2e overrides playwright.config.ts gives locally.
+      - name: Start the app
+        run: |
+          set -a; . ./.env.example; set +a
+          export BASE_URL=http://localhost:8080 GUEST_TICKET_LIMIT=1000 UPLOAD_DIR="$RUNNER_TEMP/uploads" \
+            GOTENBERG_URL=http://localhost:3000 PRINT_BASE_URL=http://host.docker.internal:8080
+          mkdir -p "$UPLOAD_DIR"
+          nohup backend/bin/ticket-app > "$RUNNER_TEMP/app.log" 2>&1 &
+          timeout 60 sh -c 'until curl -sf http://localhost:8080/healthz >/dev/null; do sleep 1; done'
+
+      - name: Playwright (installed Edge, as locally)
+        working-directory: frontend
+        run: |
+          npx playwright install --with-deps msedge
+          npx playwright test --reporter=line
+
+      - name: Keep the reports of a failed run
+        if: failure()
+        run: cp "$RUNNER_TEMP/app.log" frontend/test-results/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results
+          path: frontend/test-results/
+          retention-days: 7
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -116,10 +200,11 @@ jobs:
           semgrep scan --config p/default --severity ERROR --error --metrics off
           --exclude frontend/src/lib/paraglide
 
+      # v1.1.4 (x/tools v0.29.0) panics with exit 2 on Go 1.27 code; v1.8.0 analyses it.
       - name: govulncheck
         working-directory: backend
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...
 
       - name: Trivy filesystem scan (known vulnerabilities with a fix)

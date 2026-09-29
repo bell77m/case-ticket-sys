@@ -6,6 +6,10 @@ backend/bin/
 backend/web/dist/*
 !backend/web/dist/README.txt
 
+# Evidence files from local runs (UPLOAD_DIR); never commit guest uploads
+uploads/
+backend/uploads/
+
 # Local env and secrets
 .env
 .env.*

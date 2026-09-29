@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { axeViolations } from './helpers';
+import { baseURL, axeViolations } from './helpers';
 
 // T3.02 written summary (FR-P1, FR-I5, FR-I6) on the fixed sample report in /dev/components (no API or data needed).
 
@@ -8,7 +8,7 @@ const title = (locale: string) => JSON.parse(readFileSync(`messages/${locale}.js
 
 /** Opens the gallery in `locale`; returns the summary sentences and the sample's values as that locale formats them. */
 async function openSummary(page: Page, locale: string) {
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 	await page.goto('/dev/components');
 	const card = page.locator('section').filter({ has: page.getByRole('heading', { name: title(locale), exact: true }) });
 	await expect(card.getByRole('listitem')).toHaveCount(6);
