@@ -125,7 +125,7 @@ func (s *Server) createRole(w http.ResponseWriter, r *http.Request) {
 		if err := addPermissions(tx, id, perms); err != nil {
 			return err
 		}
-		if err := audit.Record(tx, audit.Staff(currentStaff(r).ID), "role.created", audit.Change{Target: name, To: strings.Join(perms, ","), IP: clientIP(r)}); err != nil {
+		if err := audit.Record(tx, audit.Staff(currentStaff(r).ID), "role.created", audit.Change{Target: name, To: strings.Join(perms, ","), IP: s.clientIP(r)}); err != nil {
 			return err
 		}
 		var err error
@@ -199,7 +199,7 @@ func (s *Server) setRolePermissions(w http.ResponseWriter, r *http.Request) {
 			if err := addPermissions(tx, id, added); err != nil {
 				return err
 			}
-			change := audit.Change{Target: role.Name, From: strings.Join(removed, ","), To: strings.Join(added, ","), IP: clientIP(r)}
+			change := audit.Change{Target: role.Name, From: strings.Join(removed, ","), To: strings.Join(added, ","), IP: s.clientIP(r)}
 			if err := audit.Record(tx, audit.Staff(currentStaff(r).ID), "role.changed", change); err != nil {
 				return err
 			}

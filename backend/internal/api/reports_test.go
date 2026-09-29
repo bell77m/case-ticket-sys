@@ -216,23 +216,25 @@ func TestReportsFilters_FRP2(t *testing.T) {
 	})
 }
 
+// reportValidationCases are bad report filters and the field codes they get; the PDF export shares them (FR-P2, FR-P4).
+var reportValidationCases = []struct{ query, want string }{
+	{"from=2020-13-01", `{"from":"invalid"}`},
+	{"from=2020-02-30", `{"from":"invalid"}`},
+	{"from=1999-12-31&to=2000-01-01", `{"from":"invalid"}`}, // before 2000
+	{"to=10-03-2020", `{"to":"invalid"}`},
+	{"from=2020-03-10&to=2020-03-09", `{"to":"invalid"}`},
+	{"from=2020-01-01&to=2021-01-01", `{"to":"invalid"}`}, // 367 days
+	{"tz=Mars/Olympus", `{"tz":"invalid"}`},
+	{"category_id=abc", `{"category_id":"invalid"}`},
+	{"category_id=0", `{"category_id":"invalid"}`},
+	{"from=x&tz=Nowhere&category_id=1.5", `{"category_id":"invalid","from":"invalid","tz":"invalid"}`},
+}
+
 // FR-P2: bad filters get 400 validation with a code per field; the defaults are the last 30 days in UTC.
 func TestReportsValidation_FRP2(t *testing.T) {
 	e := newAuthEnv(t)
 	c := e.session(e.newStaff("Viewer", true))
-	tests := []struct{ query, want string }{
-		{"from=2020-13-01", `{"from":"invalid"}`},
-		{"from=2020-02-30", `{"from":"invalid"}`},
-		{"from=1999-12-31&to=2000-01-01", `{"from":"invalid"}`}, // before 2000
-		{"to=10-03-2020", `{"to":"invalid"}`},
-		{"from=2020-03-10&to=2020-03-09", `{"to":"invalid"}`},
-		{"from=2020-01-01&to=2021-01-01", `{"to":"invalid"}`}, // 367 days
-		{"tz=Mars/Olympus", `{"tz":"invalid"}`},
-		{"category_id=abc", `{"category_id":"invalid"}`},
-		{"category_id=0", `{"category_id":"invalid"}`},
-		{"from=x&tz=Nowhere&category_id=1.5", `{"category_id":"invalid","from":"invalid","tz":"invalid"}`},
-	}
-	for _, tt := range tests {
+	for _, tt := range reportValidationCases {
 		t.Run(tt.query, func(t *testing.T) {
 			rec := e.withCookie(http.MethodGet, "/api/staff/reports?"+tt.query, c)
 			if want := `{"error":"validation","fields":` + tt.want + "}\n"; rec.Code != http.StatusBadRequest || rec.Body.String() != want {

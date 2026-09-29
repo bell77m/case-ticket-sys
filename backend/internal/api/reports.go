@@ -2,7 +2,9 @@ package api
 
 import (
 	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -204,55 +206,108 @@ SELECT l.id, l.building, l.floor, l.line, count(*) AS n FROM b JOIN locations l 
 WHERE b.created_at >= @s AND b.created_at < @e
 GROUP BY l.id ORDER BY l.building->>'en', l.floor->>'en', n DESC, l.line->>'en'`
 
-// GET /api/staff/reports?from=2026-09-01&to=2026-09-30&tz=Asia/Bangkok&building=HQ&category_id=2&lang=th
-// Read-only, so not audited; report.exported belongs to the PDF export.
-func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	db := s.DB.WithContext(r.Context())
-	errs := map[string]string{}
+// reportFilters are the report filters as sent (FR-P2): the query of GET /api/staff/reports, or the body of the PDF
+// export. All strings, so both get the same checks and the same field codes.
+type reportFilters struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	TZ         string `json:"tz"`
+	Building   string `json:"building"`
+	CategoryID string `json:"category_id"`
+}
 
-	tz := cmp.Or(q.Get("tz"), "UTC")
-	var today string // stays "" when PostgreSQL does not know the zone
-	if err := db.Raw("SELECT to_char(now() AT TIME ZONE name, 'YYYY-MM-DD') FROM pg_timezone_names WHERE name = ?", tz).
+// reportQuery is a checked reportFilters.
+type reportQuery struct {
+	from, to time.Time
+	days     int
+	tz       string
+	today    string // the date now in tz
+	building string
+	category int64
+}
+
+// today is the date now in time zone tz, or "" when PostgreSQL does not know the zone: the filters' tz check
+// (reports, activity log).
+func (s *Server) today(ctx context.Context, tz string) (string, error) {
+	var today string
+	if err := s.DB.WithContext(ctx).Raw("SELECT to_char(now() AT TIME ZONE name, 'YYYY-MM-DD') FROM pg_timezone_names WHERE name = ?", tz).
 		Scan(&today).Error; err != nil {
-		s.reportFailed(w, err)
-		return
+		return "", fmt.Errorf("check time zone: %w", err)
 	}
-	if today == "" {
+	return today, nil
+}
+
+// parseDay parses a filter date, YYYY-MM-DD. Years before 2000 are refused, so a report's previous period never
+// reaches year 0 (Go parses it, PostgreSQL rejects it).
+func parseDay(v string) (time.Time, bool) {
+	d, err := time.Parse(time.DateOnly, v)
+	return d, err == nil && d.Year() >= 2000
+}
+
+// checkReportFilters checks f and fills in the defaults. fields holds a code per bad field (never nil);
+// err is a database failure.
+func (s *Server) checkReportFilters(ctx context.Context, f reportFilters) (q reportQuery, fields map[string]string, err error) {
+	errs := map[string]string{}
+	q.tz, q.building = cmp.Or(f.TZ, "UTC"), f.Building
+	if q.today, err = s.today(ctx, q.tz); err != nil {
+		return q, errs, err
+	}
+	if q.today == "" {
 		errs["tz"] = "invalid"
 	}
-	date := func(name string, def time.Time) time.Time {
-		v := q.Get(name)
+	date := func(name, v string, def time.Time) time.Time {
 		if v == "" {
 			return def
 		}
-		// Years before 2000 are refused, so the previous period never reaches year 0 (Go parses it, PostgreSQL rejects it).
-		d, err := time.Parse(time.DateOnly, v)
-		if err != nil || d.Year() < 2000 {
+		d, ok := parseDay(v)
+		if !ok {
 			errs[name] = "invalid"
 		}
 		return d
 	}
-	now, _ := time.Parse(time.DateOnly, today)
-	to := date("to", now)
-	from := date("from", to.AddDate(0, 0, -29))
-	days := int(to.Sub(from).Hours()/24) + 1
-	if errs["from"]+errs["to"]+errs["tz"] == "" && (days < 1 || days > 366) {
+	now, _ := time.Parse(time.DateOnly, q.today)
+	q.to = date("to", f.To, now)
+	q.from = date("from", f.From, q.to.AddDate(0, 0, -29))
+	q.days = int(q.to.Sub(q.from).Hours()/24) + 1
+	if errs["from"]+errs["to"]+errs["tz"] == "" && (q.days < 1 || q.days > 366) {
 		errs["to"] = "invalid"
 	}
-	var category int64
-	if v := q.Get("category_id"); v != "" {
+	if v := f.CategoryID; v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || n < 1 {
 			errs["category_id"] = "invalid"
 		}
-		category = n
+		q.category = n
 	}
-	if len(errs) > 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "validation", "fields": errs})
+	return q, errs, nil
+}
+
+// GET /api/staff/reports?from=2026-09-01&to=2026-09-30&tz=Asia/Bangkok&building=HQ&category_id=2&lang=th
+// Read-only, so not audited; report.exported belongs to the PDF export.
+func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
+	v := r.URL.Query()
+	q, fields, err := s.checkReportFilters(r.Context(), reportFilters{From: v.Get("from"), To: v.Get("to"), TZ: v.Get("tz"),
+		Building: v.Get("building"), CategoryID: v.Get("category_id")})
+	if err != nil {
+		s.reportFailed(w, err)
 		return
 	}
+	if len(fields) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "validation", "fields": fields})
+		return
+	}
+	out, err := s.buildReport(r.Context(), q, v.Get("lang"))
+	if err != nil {
+		s.reportFailed(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
+// buildReport computes every card and dataset for q, with names in lang (FR-P1, FR-P2).
+func (s *Server) buildReport(ctx context.Context, q reportQuery, lang string) (reportOut, error) {
+	db := s.DB.WithContext(ctx)
+	from, to, days, tz := q.from, q.to, q.days, q.tz
 	prevFrom := from.AddDate(0, 0, -days)
 	out := reportOut{
 		Period: reportPeriod{From: from.Format(time.DateOnly), To: to.Format(time.DateOnly),
@@ -267,10 +322,9 @@ func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
 		least((CAST(@to AS date) + 1)::timestamp AT TIME ZONE @tz , now()) AS as_of`,
 		map[string]any{"pf": out.Period.PreviousFrom, "from": out.Period.From, "to": out.Period.To, "tz": tz}).Scan(&bounds).Error
 	if err != nil {
-		s.reportFailed(w, err)
-		return
+		return out, fmt.Errorf("report bounds: %w", err)
 	}
-	args := map[string]any{"building": q.Get("building"), "category": category, "tz": tz, "from": out.Period.From, "to": out.Period.To,
+	args := map[string]any{"building": q.building, "category": q.category, "tz": tz, "from": out.Period.From, "to": out.Period.To,
 		"ps": bounds.PrevStart, "s": bounds.Start, "e": bounds.End, "asof": bounds.AsOf}
 
 	var flow []struct {
@@ -304,8 +358,7 @@ func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
 		db.Raw(reportLocationSQL, args).Scan(&locs).Error,
 	)
 	if err != nil {
-		s.reportFailed(w, err)
-		return
+		return out, fmt.Errorf("report data: %w", err)
 	}
 
 	c := &out.Cards
@@ -355,7 +408,6 @@ func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
 		return cmp.Or(cmp.Compare(b.total(), a.total()), cmp.Compare(a.Assignee.ID, b.Assignee.ID))
 	})
 
-	lang := q.Get("lang")
 	for _, ct := range cats {
 		row := reportCategory{ID: ct.ID, Count: ct.N}
 		if ct.ID != nil {
@@ -387,7 +439,7 @@ func (s *Server) reports(w http.ResponseWriter, r *http.Request) {
 	for _, b := range out.ByLocation {
 		slices.SortStableFunc(b.Floors, func(x, y reportFloor) int { return cmp.Compare(y.Count, x.Count) })
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func (s *Server) reportFailed(w http.ResponseWriter, err error) {

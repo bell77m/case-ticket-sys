@@ -1,0 +1,39 @@
+# Base for staging and prod (overlays set namespace, image tags, BASE_URL, storage sizes).
+# Not here: the Ingress (T3.10) and the Vault/VSO objects (T3.11).
+#
+# Secrets: every pod reads the Secret "ticket-app-secrets", which VSO creates in each namespace from Vault.
+# Keys it must hold (values never in Git):
+#   DATABASE_URL            postgres://ticket_app:<pw>@postgres:5432/ticket?sslmode=disable   (app)
+#   MIGRATE_DATABASE_URL    postgres://ticket:<pw>@postgres:5432/ticket?sslmode=disable       (migration Job only)
+#   REDIS_URL               redis://:<pw>@redis:6379/0                                        (app)
+#   POSTGRES_PASSWORD       password of the owner role "ticket"                              (PostgreSQL)
+#   TICKET_APP_DB_PASSWORD  password of ticket_app, set once when the volume is initialized  (PostgreSQL)
+#   REDIS_PASSWORD          (Redis)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - app.yaml
+  - migrate-job.yaml
+  - postgres.yaml
+  - redis.yaml
+  - gotenberg.yaml
+images:
+  # Third-party images through Harbor's Docker Hub proxy cache: images come only from Harbor (.claude/rules/deploy.md).
+  # Placeholder host and project until T3.12; deploy/trivy-data.yaml names the same host.
+  - name: postgres
+    newName: harbor.example.internal/dockerhub/library/postgres
+  - name: redis
+    newName: harbor.example.internal/dockerhub/library/redis
+  - name: gotenberg/gotenberg
+    newName: harbor.example.internal/dockerhub/gotenberg/gotenberg
+configMapGenerator:
+  # Non-secret app settings (backend/internal/config). HTTP_ADDR (:8080) and GUEST_TICKET_LIMIT (5) keep their defaults.
+  - name: ticket-app-config
+    literals:
+      - UPLOAD_DIR=/data/uploads
+      - GOTENBERG_URL=http://gotenberg:3000
+      # Gotenberg's Chromium opens the print page through the app's own Service (docs/ARCHITECTURE.md).
+      - PRINT_BASE_URL=http://ticket-app:8080
+  - name: postgres-init
+    files:
+      - init-app-user.sh

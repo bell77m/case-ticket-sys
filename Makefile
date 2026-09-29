@@ -3,6 +3,10 @@
 # Dev settings: .env.example defaults, overridden by .env if present.
 -include .env.example
 -include .env
+# PDF export (FR-P4): Gotenberg from docker compose; its Chromium reaches the Vite server through Docker Desktop.
+# Same defaults in frontend/playwright.config.ts.
+GOTENBERG_URL ?= http://localhost:3000
+PRINT_BASE_URL ?= http://host.docker.internal:5173
 export
 
 # Runs the Go API on :8080 and the SvelteKit dev server on :5173 (proxies /api and /healthz).
@@ -42,3 +46,13 @@ migrate-down:
 # Dev-only sample locations; safe to run twice.
 seed:
 	docker compose exec -T postgres psql -U ticket -d ticket -v ON_ERROR_STOP=1 -q < backend/seed/dev.sql
+
+# T3.13: kube-linter and Trivy config (both from Docker) on the rendered staging and prod manifests.
+.PHONY: deploy-lint
+deploy-lint:
+	for o in staging prod; do \
+		m=$$(kubectl kustomize deploy/overlays/$$o) || exit 1; \
+		printf '%s\n' "$$m" | docker run --rm -i stackrox/kube-linter:v0.8.3 lint --fail-if-no-objects-found - || exit 1; \
+		printf '%s\n' "$$m" | MSYS_NO_PATHCONV=1 docker run --rm -i -v "$(CURDIR)/deploy/trivy-data.yaml:/data/trivy-data.yaml:ro" --entrypoint sh \
+			aquasec/trivy:0.74.0 -c 'cat > /tmp/$$0.yaml && trivy config --quiet --exit-code 1 --config-data /data /tmp/$$0.yaml' $$o || exit 1; \
+	done

@@ -8,13 +8,14 @@
 | Styling | CSS custom properties from [DESIGN.md](../DESIGN.md) + Svelte scoped styles | No CSS framework |
 | Charts | Chart.js | |
 | i18n | Paraglide JS | `messages/{en,zh-CN,my,th}.json` |
+| Burmese input | myanmar-tools 1.1.3 (pinned: 1.2.0 on npm does not load) | `call()` in `frontend/src/lib/api.ts` converts Zawgyi strings in every JSON write to Unicode (FR-I8); loaded only when a body holds Burmese |
 | Backend | Go, stdlib `net/http` (1.22+ routing) | No web framework |
 | ORM | GORM + PostgreSQL driver (pgx) | AutoMigrate off in production |
 | Migrations | goose | Versioned SQL files |
 | Database | PostgreSQL 16 | `pg_trgm` for multilingual search |
 | Cache / queue | Redis 7, go-redis | Sessions, rate limits, pub/sub for SSE |
 | Realtime | Server-Sent Events + Redis pub/sub | `/api/events` (ticket.view_all). Package `internal/events`: every ticket change publishes `{type, id}` on Redis channel `ticket-events` after commit (no content); each SSE client subscribes, gets a `: ping` every 25 s and is re-authorized at each ping. Clients refetch through the normal endpoints. |
-| PDF | Gotenberg (headless Chromium) | Renders the report print page |
+| PDF | Gotenberg (headless Chromium) | Renders the print pages for the report and the activity log: `POST /api/staff/reports/export` or `/api/staff/activity/export` stores the filters under a 60 s one-time token in Redis (key `print:<kind>:<sha256>`, kind report or activity) and asks Gotenberg (`GOTENBERG_URL`) to print `PRINT_BASE_URL/print/<kind>#<token>`; the page reads the data once from `GET /api/print/<kind>` (X-Print-Token) and sets `window.printReady`. Both env vars are optional; without them export answers 503. |
 | Auth | Username and password, PBKDF2-SHA256 (Go standard library) | Staff only; no SSO; session ID in HttpOnly cookie, data in Redis |
 | Notifications | In-app only | Staff see new and assigned tickets in the queue; no email (decided 2026-09-24) |
 | Secrets | HashiCorp Vault + Vault Secrets Operator | App reads env vars; no Vault code in app |
@@ -58,11 +59,11 @@ flowchart LR
 | Registry | Harbor (internal) |
 | ticket-app | Deployment, 2 replicas, `/healthz` probes, rolling updates |
 | PostgreSQL | StatefulSet + PV; CloudNativePG later if failover needed |
-| Migrations | goose Job as Argo CD PreSync hook |
+| Migrations | goose Job (image from `deploy/migrate.Dockerfile`) as Argo CD Sync hook in wave 1: after PostgreSQL (wave 0), before the app Deployment (wave 2) |
 | Uploads | PV, start 200 GB; NFS (ReadWriteMany) when multi-node |
 | NGINX | F5 NGINX Ingress Controller (community ingress-nginx retired March 2026 — verify); `client_max_body_size 100m`; allow/deny company network; `proxy_buffering off` + 1 h read timeout on `/api/events` |
 | Redis | 1 replica, password from Vault, `appendonly yes` on small PV |
-| Gotenberg | 1 replica, ClusterIP only, ~512 MB memory |
+| Gotenberg | 1 replica, ClusterIP only, ~512 MB memory; the app sets `GOTENBERG_URL` to its service and `PRINT_BASE_URL` to the app's own ClusterIP service URL, which Gotenberg's Chromium must be able to reach |
 | Vault | hashicorp/vault Helm chart, Raft storage, 1 pod (3 for HA); Kubernetes auth; file audit device; Shamir unseal 3 of 5 |
 | TLS | Company CA cert as Ingress Secret, or cert-manager / Vault PKI |
 | Backups | Nightly CronJob: pg_dump + uploads → NFS |

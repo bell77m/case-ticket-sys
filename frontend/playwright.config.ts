@@ -19,7 +19,20 @@ export default defineConfig({
 	projects: [{ name: 'phone', use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: false } }],
 	webServer: [
 		// e2e opens about 14 tickets per run from localhost, over the guest limit of 5 per 10 minutes (NFR-3).
-		{ command: 'go run ./cmd/ticket-app', cwd: '../backend', url: 'http://localhost:8080/healthz', env: { ...env, GUEST_TICKET_LIMIT: '1000' }, reuseExistingServer: true, timeout: 120_000 },
+		// PDF export (FR-P4): the Makefile's defaults, which .env.example does not carry.
+		{
+			command: 'go run ./cmd/ticket-app',
+			cwd: '../backend',
+			url: 'http://localhost:8080/healthz',
+			env: {
+				...env,
+				GUEST_TICKET_LIMIT: '1000',
+				GOTENBERG_URL: env.GOTENBERG_URL || 'http://localhost:3000',
+				PRINT_BASE_URL: env.PRINT_BASE_URL || 'http://host.docker.internal:5173'
+			},
+			reuseExistingServer: true,
+			timeout: 120_000
+		},
 		{ command: 'npm run dev', url: 'http://localhost:5173', reuseExistingServer: true, timeout: 120_000 }
 	]
 });

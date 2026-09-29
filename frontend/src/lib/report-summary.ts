@@ -17,7 +17,8 @@ export function writtenSummary(r: Report): string[] {
 	const locale = getLocale();
 	const num = new Intl.NumberFormat(locale).format;
 	// Period dates are plain YYYY-MM-DD, which Date reads as UTC midnight; format them in UTC so they never shift a day.
-	const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+	// Gregorian in every language, like the rest of the app (Thai would default to the Buddhist era).
+	const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC', calendar: 'gregory' });
 	const c = r.cards;
 	const from = date.format(new Date(r.period.from));
 	const to = date.format(new Date(r.period.to));

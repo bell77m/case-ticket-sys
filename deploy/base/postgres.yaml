@@ -1,0 +1,113 @@
+# PostgreSQL 16, one pod (CloudNativePG later if failover is needed). The owner role "ticket" runs migrations;
+# init-app-user.sh creates ticket_app when the volume is first initialized.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # Any UID works: the image's entrypoint adds a passwd entry for it (nss_wrapper).
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: ticket
+            - name: POSTGRES_DB
+              value: ticket
+            - name: PGDATA # a subdirectory: the volume root may hold lost+found
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ticket-app-secrets
+                  key: POSTGRES_PASSWORD
+            - name: TICKET_APP_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ticket-app-secrets
+                  key: TICKET_APP_DB_PASSWORD
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, ticket, -d, ticket]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, ticket, -d, ticket]
+            initialDelaySeconds: 30 # room for initdb on an empty volume
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # writes go to the volume and the two emptyDirs below
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: init
+          configMap:
+            name: postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

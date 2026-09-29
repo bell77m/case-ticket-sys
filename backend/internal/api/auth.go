@@ -60,7 +60,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
-	ctx, ip := r.Context(), clientIP(r)
+	ctx, ip := r.Context(), s.clientIP(r)
 	username := auth.NormalizeUsername(in.Username)
 
 	blocked, err := s.Sessions.LoginAttempt(ctx, username, ip)
@@ -264,7 +264,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
-	ctx, me, ip := r.Context(), currentStaff(r), clientIP(r)
+	ctx, me, ip := r.Context(), currentStaff(r), s.clientIP(r)
 	blocked, err := s.Sessions.LoginAttempt(ctx, me.Username, ip)
 	if err != nil {
 		slog.Error("change password", "error", err)

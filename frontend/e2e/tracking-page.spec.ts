@@ -18,6 +18,30 @@ async function submitTicket(page: Page, withPhoto: boolean) {
 	return page.getByLabel('Your tracking link').inputValue();
 }
 
+// T3.08, FR-I8: Burmese typed in Zawgyi is saved as Unicode, and Unicode Burmese is saved as typed.
+// Samples from myanmar-tools' test data (resources/mmgov_zawgyi_src.txt and mmgov_unicode_out.txt).
+test('Zawgyi input is saved as Unicode', async ({ page }) => {
+	const zawgyi = 'စားနပ္ရိကၡာ၊ ေထာက္ပံ့ပစၥည္း ႏွင့္ အလွဴေငြမ်ား ေပးအပ္သည္။';
+	const unicode = 'စားနပ်ရိက္ခာ၊ ထောက်ပံ့ပစ္စည်း နှင့် အလှူငွေများ ပေးအပ်သည်။';
+	const unicodeReply = 'နေပြည်တော် ဇူလိုင် ၂၆';
+	await page.goto('/report');
+	await page.getByLabel('Your name').fill('Mya Mya');
+	await page.getByLabel('Employee ID').fill('E5005');
+	await page.getByLabel('Building').selectOption({ index: 1 });
+	await page.getByLabel('Floor').selectOption({ index: 1 });
+	await page.getByLabel('Line').selectOption({ index: 1 });
+	await page.getByLabel('What is the problem?').fill(zawgyi);
+	await page.getByRole('button', { name: 'Submit ticket' }).click();
+	await page.goto(await page.getByLabel('Your tracking link').inputValue());
+	await expect(page.getByText(unicode, { exact: true })).toBeVisible();
+
+	await page.getByLabel('Write a reply').fill(unicodeReply);
+	await page.getByRole('button', { name: 'Send reply' }).click();
+	await expect(page.getByLabel('Write a reply')).toHaveValue('');
+	await page.reload();
+	await expect(page.getByText(unicodeReply, { exact: true })).toBeVisible();
+});
+
 // T1.15, FR-G3: the tracking link shows the ticket, its evidence, and lets the guest reply.
 test('guest opens the tracking link, views evidence and replies', async ({ page }) => {
 	const url = await submitTicket(page, true);

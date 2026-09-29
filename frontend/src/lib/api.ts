@@ -24,7 +24,18 @@ export class ApiError extends Error {
 	}
 }
 
+// Only bodies holding Burmese load the Zawgyi converter.
+const myanmar = /\p{Script=Myanmar}/u;
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
+	// FR-I8: every JSON write passes here, so Zawgyi is converted once for all forms. Secrets are sent as typed.
+	if (typeof init?.body === 'string' && myanmar.test(init.body)) {
+		const { toUnicode } = await import('./zawgyi');
+		const body = JSON.stringify(JSON.parse(init.body), (key, v) =>
+			typeof v === 'string' && !/password|token|secret|code/i.test(key) ? toUnicode(v) : v
+		);
+		init = { ...init, body };
+	}
 	const res = await fetch(path, init);
 	const body = await res.json().catch(() => ({}));
 	if (!res.ok) throw new ApiError(res.status, body.error ?? 'internal', body.fields);
@@ -283,3 +294,96 @@ export type Report = {
 };
 
 export const getReport = (params: URLSearchParams) => call<Report>(`/api/staff/reports?${params}`);
+
+/**
+ * The report as a PDF (FR-P4, FR-I6): report.view. Filters as getReport takes them, all strings, plus lang.
+ * Errors: pdf.unavailable (503), pdf.failed (502), validation.
+ */
+export async function exportReport(filters: Record<string, string>) {
+	const res = await fetch('/api/staff/reports/export', sendJSON('POST', filters));
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new ApiError(res.status, body.error ?? 'internal', body.fields);
+	}
+	const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'tickets-report.pdf';
+	return { name, blob: await res.blob() };
+}
+
+/**
+ * The print page's report (FR-P4): the export's filters (null = not set; category named in `lang`, building by its
+ * English name) and language. A second call with the same token gets 404 print.not_found.
+ */
+export type PrintReport = Report & {
+	lang: string;
+	filters: { from: string; to: string; tz: string; building: string | null; category: string | null; category_id: number | null };
+};
+
+export const getPrintReport = (token: string) => call<PrintReport>('/api/print/report', { headers: { 'X-Print-Token': token } });
+
+// Activity log (T3.06, FR-L1), audit.view only. The one view with each row's target and IP address. `action` is an
+// audit code such as "ticket.status_changed" (translated in the frontend); from/to are stored values, except that
+// ticket.assigned shows staff names and ticket.category_changed category names in the requested language.
+export type ActivityItem = {
+	id: number;
+	created_at: string;
+	actor: { type: 'guest' | 'staff' | 'system'; id?: number; name?: string };
+	action: string;
+	ticket_id?: number;
+	target?: string;
+	from?: string;
+	to?: string;
+	ip?: string;
+};
+export type ActivityPage = { items: ActivityItem[]; total: number; page: number; page_size: number };
+
+/**
+ * Params: staff (actor staff ID), action (repeatable, at most 20), ticket, from, to (YYYY-MM-DD, inclusive), tz (IANA),
+ * page (1–1000), page_size (1–100, default 50), lang. Newest first. Bad values: 400 validation with field codes.
+ */
+export const getActivity = (params: URLSearchParams) => call<ActivityPage>(`/api/staff/activity?${params}`);
+
+/** getActivity's filters as a JSON body: all strings except action, plus lang (no paging). */
+export type ActivityExportBody = {
+	staff?: string;
+	action?: string[];
+	ticket?: string;
+	from?: string;
+	to?: string;
+	tz?: string;
+	lang: string;
+};
+
+/**
+ * The filtered log as activity-log-YYYY-MM-DD.pdf (FR-P4, FR-I6): audit.view, newest first, at most 5000 rows.
+ * Errors: pdf.unavailable (503), pdf.failed (502), validation.
+ */
+export async function exportActivity(body: ActivityExportBody) {
+	const res = await fetch('/api/staff/activity/export', sendJSON('POST', body));
+	if (!res.ok) {
+		const err = await res.json().catch(() => ({}));
+		throw new ApiError(res.status, err.error ?? 'internal', err.fields);
+	}
+	const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'activity-log.pdf';
+	return { name, blob: await res.blob() };
+}
+
+/**
+ * The print page's log: the rows (at most 5000), `truncated` when more matched, the export's filters (null = not set,
+ * [] = any action; staff with its name) and language. A second call with the same token gets 404 print.not_found.
+ */
+export type PrintActivity = {
+	items: ActivityItem[];
+	truncated: boolean;
+	lang: string;
+	filters: {
+		staff: NamedItem | null;
+		action: string[];
+		ticket: number | null;
+		from: string | null;
+		to: string | null;
+		tz: string;
+	};
+};
+
+export const getPrintActivity = (token: string) =>
+	call<PrintActivity>('/api/print/activity', { headers: { 'X-Print-Token': token } });

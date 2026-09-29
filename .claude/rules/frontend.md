@@ -7,8 +7,11 @@ paths:
 
 - Svelte 5 runes (`$state`, `$derived`, `$props`). adapter-static SPA, no server routes.
 - Every user-facing string is a Paraglide message. Add the key to en, zh-CN, my and th together.
-- Format dates and numbers with `Intl`, in the active locale.
-- Burmese text input: detect Zawgyi and convert to Unicode before submit (FR-I8).
+- Format dates and numbers with `Intl`, in the active locale. Every `Intl.DateTimeFormat` passes `calendar: 'gregory'`: Thai defaults to the Buddhist era (2569 for 2026), and the app shows Gregorian years in every language.
+- To look at a PDF export: the Read tool cannot render PDFs here (no pdftoppm) and headless Edge shows a blank viewer. Screenshot the print page (`/print/report`, mocked with `page.route`) with Playwright instead; it is the page Gotenberg prints.
+- Burmese text input: detect Zawgyi and convert to Unicode before submit (FR-I8). `call()` in src/lib/api.ts already does it for every JSON write; send new writes through `call()`.
+- A dependency imported only with `import()` goes in `optimizeDeps.include` (vite.config.ts); otherwise the dev server finds it on first use and reloads the page mid-action, which fails e2e.
+- Unicode ranges in source: tool inputs turn `\u` escapes into raw characters. Use a script property (`/\p{Script=Myanmar}/u`) or build the characters from char codes.
 - UI checks are convenience only; the API enforces permissions.
 - Never save on a select's change event: on Windows, arrow keys on a closed select fire change. Use an explicit Save button (see the ticket detail Details card).
 - Windows file names are case-insensitive: never name a module like a component (`toast.svelte.ts` next to `Toast.svelte` resolves to the component). Use a distinct name such as `toast-state.svelte.ts`.

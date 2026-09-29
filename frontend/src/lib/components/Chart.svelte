@@ -55,14 +55,18 @@
 	import { untrack } from 'svelte';
 
 	// Build `config` in a $derived (plain objects, not $state): Chart.js keeps and mutates what it is given.
-	let { config, label }: { config: ChartConfiguration; label: string } = $props();
+	// print (the PDF page, FR-P4): drawn at once with no animation, at twice the pixels so the PDF image stays sharp.
+	let { config, label, print = false }: { config: ChartConfiguration; label: string; print?: boolean } = $props();
 
 	let canvas: HTMLCanvasElement;
 	let chart: Chart | undefined;
 
 	$effect(() => {
 		applyTheme();
-		const c = new Chart(canvas, untrack(() => config));
+		const c = new Chart(
+			canvas,
+			untrack(() => (print ? { ...config, options: { ...config.options, animation: false, devicePixelRatio: 2 } } : config))
+		);
 		chart = c;
 		return () => c.destroy();
 	});

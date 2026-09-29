@@ -128,6 +128,10 @@ func TestStaffRoutes_FRR3(t *testing.T) {
 	noPerms := e.session(e.newStaff(empty, true))
 	viewer := e.session(e.newStaff("Viewer", true))
 	wildcard := regexp.MustCompile(`\{[^}]*\}`)
+	// Non-GET staff routes a Viewer may call, with the reason. They still need their permission (checked above).
+	viewerMay := map[string]string{
+		"POST /api/staff/reports/export": "a PDF of the reports a Viewer already sees; changes no data (report.view, FR-P4)",
+	}
 	for _, p := range staff {
 		method, path, ok := strings.Cut(p, " ")
 		if !ok { // no method: the route takes every method, so test it as a write
@@ -143,7 +147,7 @@ func TestStaffRoutes_FRR3(t *testing.T) {
 			if rec.Code != http.StatusForbidden || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Error != "auth.forbidden" {
 				t.Errorf("role without permissions = %d %s, want 403 auth.forbidden; wrap the route in require() (FR-R3)", rec.Code, rec.Body)
 			}
-			if method != http.MethodGet {
+			if method != http.MethodGet && viewerMay[p] == "" {
 				if rec := e.withCookie(method, path, viewer); rec.Code != http.StatusForbidden {
 					t.Errorf("Viewer = %d %s, want 403 on a write", rec.Code, rec.Body)
 				}

@@ -14,6 +14,8 @@
 	// Set by routes/staff/+layout.ts; guest pages have no signed-in staff member.
 	const me = $derived(page.data.me);
 	let menu = $state<HTMLDivElement>();
+	// The print page (Gotenberg, FR-P4) is the report alone: no language picker, account menu or page padding.
+	const print = $derived(page.route.id?.startsWith('/print/') ?? false);
 
 	// Per-language typography rules in tokens.css key off :lang(), so <html lang> must match the locale.
 	$effect(() => {
@@ -33,10 +35,10 @@
 	<title>{m.app_title()}</title>
 </svelte:head>
 
-<main>
+<main class={{ print }}>
 	<!-- No top bar: the language picker (FR-I2) and, for staff, the account menu sit top right on every page and scroll away with it. -->
 	<!-- /report puts the language picker in its own row, next to the back link and over the form column. -->
-	{#if page.url.pathname !== '/report'}
+	{#if page.url.pathname !== '/report' && !print}
 		<div class="tools">
 			<LanguageSwitcher />
 			{#if me}
@@ -52,9 +54,12 @@
 					<p class="menu-name">{me.name}</p>
 					<p class="menu-username">{me.username}</p>
 					<span class="role">{me.role}</span>
-					<!-- Reports with report.view (T3.03); admin pages: staff and roles with staff.manage (T2.10), lookups with category.manage (T2.11). Display only: the API checks every call (FR-R3). -->
+					<!-- Reports with report.view (T3.03); the activity log with audit.view (T3.06); admin pages: staff and roles with staff.manage (T2.10), lookups with category.manage (T2.11). Display only: the API checks every call (FR-R3). -->
 					{#if me.permissions.includes('report.view')}
 						<a href="/staff/reports" onclick={() => menu?.hidePopover()}>{m.reports_heading()}</a>
+					{/if}
+					{#if me.permissions.includes('audit.view')}
+						<a href="/staff/admin/activity" onclick={() => menu?.hidePopover()}>{m.activity_heading()}</a>
 					{/if}
 					{#if me.permissions.includes('staff.manage')}
 						<a href="/staff/admin/staff" onclick={() => menu?.hidePopover()}>{m.staff_heading()}</a>
@@ -209,5 +214,10 @@
 		main {
 			padding: var(--space-xxl) var(--space-lg);
 		}
+	}
+	/* The @page margin frames the print page. */
+	main.print {
+		max-width: none;
+		padding: 0;
 	}
 </style>

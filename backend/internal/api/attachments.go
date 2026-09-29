@@ -164,7 +164,7 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return audit.Record(tx, audit.Guest, "attachment.added", audit.Change{
-			TicketID: &ticketID, Target: mediaType, To: strconv.FormatInt(size, 10), IP: clientIP(r),
+			TicketID: &ticketID, Target: mediaType, To: strconv.FormatInt(size, 10), IP: s.clientIP(r),
 		})
 	})
 	if err != nil {

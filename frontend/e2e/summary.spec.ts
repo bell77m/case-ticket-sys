@@ -16,7 +16,8 @@ async function openSummary(page: Page, locale: string) {
 	// Formatted in the browser, whose Intl data the page uses too (Node's ICU may differ).
 	const values = await page.evaluate((locale) => {
 		const num = new Intl.NumberFormat(locale).format;
-		const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+		// Gregorian in every language, like the rest of the app (Thai would default to the Buddhist era).
+		const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC', calendar: 'gregory' });
 		return [
 			date.format(new Date('2026-08-27')),
 			date.format(new Date('2026-09-25')),

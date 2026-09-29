@@ -7,6 +7,7 @@
 	import Card from '$lib/components/Card.svelte';
 	import TextInput from '$lib/components/TextInput.svelte';
 	import { showToast } from '$lib/components/toast-state.svelte';
+	import { permissions } from '$lib/permissions';
 	import { m } from '$lib/paraglide/messages';
 	import { getLocale } from '$lib/paraglide/runtime';
 
@@ -15,20 +16,6 @@
 	// Display only: the API checks role.manage again (FR-R3). Everyone else with staff.manage reads the grid.
 	const canEdit = $derived(data.me.permissions.includes('role.manage'));
 
-	// Rows in the order of rbac.All (backend/internal/rbac/rbac.go). Codes are translated here only.
-	const permissions: [string, () => string][] = [
-		['ticket.view_all', m.perm_ticket_view_all],
-		['ticket.comment', m.perm_ticket_comment],
-		['ticket.update', m.perm_ticket_update],
-		['ticket.assign', m.perm_ticket_assign],
-		['ticket.delete', m.perm_ticket_delete],
-		['report.view', m.perm_report_view],
-		['audit.view', m.perm_audit_view],
-		['category.manage', m.perm_category_manage],
-		['staff.manage', m.perm_staff_manage],
-		['staff.create', m.perm_staff_create],
-		['role.manage', m.perm_role_manage]
-	];
 	// FR-A3: kept for the Root Admin role; the API refuses them on any other role.
 	const rootOnly = (p: string) => p === 'staff.create' || p === 'role.manage';
 	// The Root Admin role is fixed (the API answers role.root_fixed).

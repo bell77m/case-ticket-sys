@@ -52,9 +52,10 @@ type queueFilter struct {
 
 func parseQueueFilter(q url.Values) (queueFilter, map[string]string) {
 	f := queueFilter{statuses: q["status"], priorities: q["priority"], assignee: q.Get("assignee"),
-		text: strings.TrimSpace(q.Get("q")), page: 1, size: 25}
+		text: strings.TrimSpace(q.Get("q"))}
 	errs := map[string]string{}
-	// Caps keep one request cheap: at most 10 values per filter, OFFSET at most 1000 pages.
+	f.page, f.size = parsePage(q, 25, errs)
+	// Caps keep one request cheap: at most 10 values per filter.
 	if len(f.statuses) > 10 {
 		errs["status"] = "invalid"
 	}
@@ -79,6 +80,13 @@ func parseQueueFilter(q url.Values) (queueFilter, map[string]string) {
 	if utf8.RuneCountInString(f.text) > 200 {
 		errs["q"] = "too_long"
 	}
+	return f, errs
+}
+
+// parsePage reads page (1–1000, default 1) and page_size (1–100, default def) from q; a bad value gets an "invalid"
+// code in errs. The caps keep one request cheap: OFFSET at most 1000 pages.
+func parsePage(q url.Values, def int, errs map[string]string) (page, size int) {
+	page, size = 1, def
 	number := func(name string, dst *int, hi int) {
 		if v := q.Get(name); v != "" {
 			n, err := strconv.Atoi(v)
@@ -89,9 +97,9 @@ func parseQueueFilter(q url.Values) (queueFilter, map[string]string) {
 			*dst = n
 		}
 	}
-	number("page", &f.page, 1000)
-	number("page_size", &f.size, 100)
-	return f, errs
+	number("page", &page, 1000)
+	number("page_size", &size, 100)
+	return page, size
 }
 
 func (f queueFilter) apply(db *gorm.DB, me int64) *gorm.DB {

@@ -1,0 +1,36 @@
+# Production: release tags only, manual sync in Argo CD (T3.14). Larger volumes than staging.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ticket-prod
+resources:
+  - ../../base
+images:
+  # Set to the release tag vX.Y.Z; both images are built from the same commit and share the tag.
+  # Placeholder Harbor host until T3.12 names the project.
+  - name: ticket-app
+    newName: harbor.example.internal/ticket/ticket-app
+    newTag: v0.1.0
+  - name: ticket-migrate
+    newName: harbor.example.internal/ticket/ticket-migrate
+    newTag: v0.1.0
+configMapGenerator:
+  - name: ticket-app-config
+    behavior: merge
+    literals:
+      - BASE_URL=https://tickets.example.internal # placeholder until T3.10 sets the host
+patches:
+  # Uploads start at 200 GB (docs/ARCHITECTURE.md). Volume sizes only take effect when the claim is first created.
+  - target:
+      kind: PersistentVolumeClaim
+      name: ticket-app-uploads
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 200Gi
+  - target:
+      kind: StatefulSet
+      name: postgres
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 50Gi

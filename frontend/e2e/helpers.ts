@@ -30,6 +30,16 @@ export async function guestTicket(request: APIRequestContext, caseDetails: strin
 	return { id: body.ticket_id as number, token: body.tracking_token as string };
 }
 
+/** Gives every graph data today: an urgent ticket assigned to the signed-in staff member, with a public reply. */
+export async function ticketForEveryGraph(page: Page, request: APIRequestContext) {
+	const { id } = await guestTicket(request, 'The barcode scanner at the packing line stopped reading labels.');
+	const me = await (await page.request.get('/api/auth/me')).json();
+	expect((await page.request.patch(`/api/staff/tickets/${id}`, { data: { priority: 'urgent' } })).ok()).toBe(true);
+	expect((await page.request.put(`/api/staff/tickets/${id}/assignee`, { data: { assignee_id: me.id } })).ok()).toBe(true);
+	const reply = await page.request.post(`/api/staff/tickets/${id}/comments`, { data: { body: 'Looking into it.', internal: false } });
+	expect(reply.ok()).toBe(true);
+}
+
 const axeSource = readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
 
 /** Runs axe-core (WCAG 2.2 AA) on the current page and returns "rule (nodes)" per violation. */

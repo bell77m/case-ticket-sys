@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -102,34 +103,17 @@ func (s *Server) staffTicket(w http.ResponseWriter, r *http.Request) {
 
 	// Staff and category names the ticket, its comments and its timeline refer to: one query each.
 	var staffIDs, catIDs []int64
-	addID := func(dst *[]int64, v string) { // v is an ID as audit text; "" or anything else is skipped
-		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
-			*dst = append(*dst, id)
-		}
-	}
 	addID(&staffIDs, optText(t.AssigneeID))
 	addID(&catIDs, optText(t.CategoryID))
 	for _, c := range comments {
 		addID(&staffIDs, optText(c.AuthorStaffID))
 	}
 	for _, ev := range events {
-		addID(&staffIDs, optText(ev.ActorStaffID))
-		switch ev.Action {
-		case "ticket.assigned":
-			addID(&staffIDs, optText(ev.FromValue))
-			addID(&staffIDs, optText(ev.ToValue))
-		case "ticket.category_changed":
-			addID(&catIDs, optText(ev.FromValue))
-			addID(&catIDs, optText(ev.ToValue))
-		}
+		auditRefs(ev, &staffIDs, &catIDs)
 	}
-	var staff []models.Staff // deactivated staff too: history keeps their names
-	var cats []models.Category
+	var names, catNames map[string]string
 	if err == nil {
-		err = errors.Join(
-			db.Select("id", "name").Where("id IN ?", staffIDs).Find(&staff).Error,
-			db.Where("id IN ?", catIDs).Find(&cats).Error,
-		)
+		names, catNames, err = nameMaps(db, staffIDs, catIDs, lang)
 	}
 	if err != nil {
 		slog.Error("staff ticket", "error", err)
@@ -137,13 +121,6 @@ func (s *Server) staffTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	names, catNames := map[string]string{}, map[string]string{} // keyed by ID as text, like audit from/to
-	for _, st := range staff {
-		names[strconv.FormatInt(st.ID, 10)] = st.Name
-	}
-	for _, c := range cats {
-		catNames[strconv.FormatInt(c.ID, 10)] = pickName(c.Name, lang)
-	}
 	if name, ok := catNames[optText(t.CategoryID)]; ok {
 		out.Category = &name
 	}
@@ -162,21 +139,70 @@ func (s *Server) staffTicket(w http.ResponseWriter, r *http.Request) {
 		out.Attachments = append(out.Attachments, trackAttachment{ID: f.ID, MediaType: f.MediaType, SizeBytes: f.SizeBytes, CreatedAt: f.CreatedAt})
 	}
 	for _, ev := range events {
-		te := timelineEvent{ID: ev.ID, Action: ev.Action, From: optText(ev.FromValue), To: optText(ev.ToValue), CreatedAt: ev.CreatedAt}
+		te := timelineEvent{ID: ev.ID, Action: ev.Action, CreatedAt: ev.CreatedAt}
+		te.From, te.To = auditValues(ev, names, catNames)
 		te.Actor.Type = ev.ActorType
 		if ev.ActorStaffID != nil {
 			te.Actor.Name = names[optText(ev.ActorStaffID)]
 		}
-		// Status and priority codes, and comment visibility, stay as stored: the frontend translates them.
-		switch ev.Action {
-		case "ticket.assigned":
-			te.From, te.To = lookup(names, te.From), lookup(names, te.To)
-		case "ticket.category_changed":
-			te.From, te.To = lookup(catNames, te.From), lookup(catNames, te.To)
-		}
 		out.Timeline = append(out.Timeline, te)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// addID appends v, an ID as audit text, to dst; "" or anything else is skipped.
+func addID(dst *[]int64, v string) {
+	if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+		*dst = append(*dst, id)
+	}
+}
+
+// auditRefs adds the staff and category IDs an audit row names: its actor, and both sides of an assignment or a
+// category change.
+func auditRefs(ev models.AuditEntry, staffIDs, catIDs *[]int64) {
+	addID(staffIDs, optText(ev.ActorStaffID))
+	switch ev.Action {
+	case "ticket.assigned":
+		addID(staffIDs, optText(ev.FromValue))
+		addID(staffIDs, optText(ev.ToValue))
+	case "ticket.category_changed":
+		addID(catIDs, optText(ev.FromValue))
+		addID(catIDs, optText(ev.ToValue))
+	}
+}
+
+// auditValues is an audit row's old and new value for display: assignee and category IDs become names. Status and
+// priority codes, and comment visibility, stay as stored: the frontend translates them.
+func auditValues(ev models.AuditEntry, names, catNames map[string]string) (from, to string) {
+	from, to = optText(ev.FromValue), optText(ev.ToValue)
+	switch ev.Action {
+	case "ticket.assigned":
+		return lookup(names, from), lookup(names, to)
+	case "ticket.category_changed":
+		return lookup(catNames, from), lookup(catNames, to)
+	}
+	return from, to
+}
+
+// nameMaps reads staff names (deactivated staff too: history keeps their names) and category names in lang, one
+// query each, keyed by ID as text like audit from/to values.
+func nameMaps(db *gorm.DB, staffIDs, catIDs []int64, lang string) (names, catNames map[string]string, err error) {
+	var staff []models.Staff
+	var cats []models.Category
+	if err := errors.Join(
+		db.Select("id", "name").Where("id IN ?", staffIDs).Find(&staff).Error,
+		db.Where("id IN ?", catIDs).Find(&cats).Error,
+	); err != nil {
+		return nil, nil, fmt.Errorf("names: %w", err)
+	}
+	names, catNames = map[string]string{}, map[string]string{}
+	for _, st := range staff {
+		names[strconv.FormatInt(st.ID, 10)] = st.Name
+	}
+	for _, c := range cats {
+		catNames[strconv.FormatInt(c.ID, 10)] = pickName(c.Name, lang)
+	}
+	return names, catNames, nil
 }
 
 // lookup maps an ID stored as audit text to its display name; "" or an ID with no row left stays as stored.

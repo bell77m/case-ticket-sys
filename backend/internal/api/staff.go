@@ -122,7 +122,7 @@ func (s *Server) createStaff(w http.ResponseWriter, r *http.Request) {
 		if id == 0 { // the only unique column besides id
 			return errUsernameTaken
 		}
-		if err := audit.Record(tx, audit.Staff(currentStaff(r).ID), "staff.created", audit.Change{Target: username, To: role.Name, IP: clientIP(r)}); err != nil {
+		if err := audit.Record(tx, audit.Staff(currentStaff(r).ID), "staff.created", audit.Change{Target: username, To: role.Name, IP: s.clientIP(r)}); err != nil {
 			return err
 		}
 		return tx.Raw(accountQuery+" WHERE s.id = ?", id).Scan(&out).Error
@@ -153,7 +153,7 @@ func (s *Server) updateStaff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	me, ip := currentStaff(r), clientIP(r)
+	me, ip := currentStaff(r), s.clientIP(r)
 	var out staffAccount
 	err = s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		// ponytail: one global lock for every staff change; they are rare. Two requests cannot both see
@@ -283,7 +283,7 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		if username == "" {
 			return gorm.ErrRecordNotFound
 		}
-		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "staff.password_reset", audit.Change{Target: username, IP: clientIP(r)})
+		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "staff.password_reset", audit.Change{Target: username, IP: s.clientIP(r)})
 	})
 	if err != nil {
 		writeStaffError(w, err, "reset password")

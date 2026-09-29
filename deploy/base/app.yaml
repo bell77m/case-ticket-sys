@@ -1,0 +1,118 @@
+# ticket-app: the Go API with the SvelteKit SPA embedded (Dockerfile). Default rolling update keeps one pod serving.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticket-app
+  labels:
+    app.kubernetes.io/name: ticket-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "2" # after the migration Job (migrate-job.yaml)
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ticket-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ticket-app
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # distroless "nonroot"
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch # no recursive chown of the uploads volume on every start
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        # Spreads the pods once there is more than one node; no effect on single-node k3s.
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: ticket-app
+      containers:
+        - name: ticket-app
+          image: ticket-app
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ticket-app-config
+          env:
+            # The app connects as ticket_app; the owner URL (MIGRATE_DATABASE_URL) goes only to the migration Job.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ticket-app-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ticket-app-secrets
+                  key: REDIS_URL
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # the app writes only to UPLOAD_DIR
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: ticket-app-uploads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-app
+  labels:
+    app.kubernetes.io/name: ticket-app
+spec:
+  selector:
+    app.kubernetes.io/name: ticket-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Evidence photos and videos, shared by both app pods.
+# ReadWriteOnce on purpose: T3.09 is a single k3s node, its local-path storage offers only RWO, and RWO still lets
+# both pods mount the volume because they run on that node. Before a second node joins, move this claim to an NFS
+# (ReadWriteMany) storage class (docs/ARCHITECTURE.md, Uploads); until then every app pod stays on the volume's node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ticket-app-uploads
+  labels:
+    app.kubernetes.io/name: ticket-app
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi

@@ -184,6 +184,23 @@ func TestAuditCoverage_FRL1(t *testing.T) {
 			}
 			return []wantAudit{{action: "staff.password_reset", target: st.Username}}
 		},
+		"POST /api/staff/reports/export": func(e *testEnv) []wantAudit {
+			e.useGotenberg(newFakeGotenberg(e.t, http.StatusOK, fakePDF).url, "http://localhost:5173")
+			body := `{"from": "2020-03-01", "to": "2020-03-10", "lang": "my"}`
+			if rec := e.sendJSON(http.MethodPost, "/api/staff/reports/export", e.session(e.newStaff("Viewer", true)), body); rec.Code != http.StatusOK {
+				e.t.Fatalf("POST export = %d %s", rec.Code, rec.Body)
+			}
+			return []wantAudit{{action: "report.exported",
+				target: `{"building":"","category_id":"","from":"2020-03-01","lang":"my","to":"2020-03-10"}`}}
+		},
+		"POST /api/staff/activity/export": func(e *testEnv) []wantAudit {
+			e.useGotenberg(newFakeGotenberg(e.t, http.StatusOK, fakePDF).url, "http://localhost:5173")
+			body := `{"action": ["login.failed"], "from": "2020-03-01", "lang": "th"}`
+			if rec := e.sendJSON(http.MethodPost, "/api/staff/activity/export", e.session(e.newStaff("Team Lead", true)), body); rec.Code != http.StatusOK {
+				e.t.Fatalf("POST activity export = %d %s", rec.Code, rec.Body)
+			}
+			return []wantAudit{{action: "activity.exported", target: `{"action":["login.failed"],"from":"2020-03-01","tz":"UTC","lang":"th"}`}}
+		},
 		"POST /api/auth/password": func(e *testEnv) []wantAudit {
 			st := e.newStaff("Agent", true)
 			if rec := e.sendJSON(http.MethodPost, "/api/auth/password", e.session(st), `{"current_password": "`+testPassword+`", "new_password": "another-password-1"}`); rec.Code != http.StatusNoContent {

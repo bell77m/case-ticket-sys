@@ -1,0 +1,5 @@
+# Check data for `trivy config --config-data` (make deploy-lint): KSV-0125 accepts images only from our Harbor.
+# Placeholder host until T3.12; keep it equal to the Harbor host in the kustomizations.
+ksv0125:
+  trusted_registries:
+    - harbor.example.internal

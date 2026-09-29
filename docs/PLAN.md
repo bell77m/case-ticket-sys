@@ -231,24 +231,29 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Publish ticket changes to Redis; `GET /api/events` SSE per pod; frontend EventSource refreshes queue and dashboard.
     - Done when: a change in one browser shows in another within 2 seconds, with 2 app instances running.
     - Status: done. Every ticket change publishes `{type, id}` to Redis after commit and `GET /api/events` (ticket.view_all, re-checked each 25 s heartbeat) streams it from any pod; the queue, dashboard and ticket detail refetch within about 1 s (31 ms across two instances in the Go test), and catch up after a dropped stream. See [note](notes/T3.04.md).
-- [ ] **T3.05** PDF export — M · deps: T3.03 · be + fe · FR-P4
+- [x] **T3.05** PDF export — M · deps: T3.03 · be + fe · FR-P4
     - Print page, 60-second one-time token, Gotenberg call, `tickets-report-YYYY-MM-DD.pdf`, `report.exported` audited.
     - Done when: exported PDF shows charts and Burmese and Thai text correctly.
-- [ ] **T3.06** Activity log page — M · deps: T2.02, T3.05 · be + fe · FR-L1–L4
+    - Status: done. "Export PDF" on the dashboard has Gotenberg print /print/report with a 60-second one-time token and downloads `tickets-report-YYYY-MM-DD.pdf` (cards, summary, 7 graphs with tables, filters) in the viewer's language, audited as report.exported; Thai and Burmese PDFs embed the Noto fonts and the chart images. See [note](notes/T3.05.md).
+- [x] **T3.06** Activity log page — M · deps: T2.02, T3.05 · be + fe · FR-L1–L4
     - Filters (staff, action, ticket, date), pagination, PDF export; needs `audit.view`.
     - Done when: an Agent gets 403 and a Team Lead sees the log.
-- [ ] **T3.07** Translations — M · deps: all UI tasks · i18n-translator · FR-I1, FR-I3
+    - Status: done. /staff/admin/activity (audit.view) lists audit_log newest first with staff, action, ticket and date filters, pagination and translated action labels, and exports `activity-log-YYYY-MM-DD.pdf` (up to 5000 rows) through the shared print-token flow, audited as activity.exported; an Agent gets 403, a Team Lead sees the log. See [note](notes/T3.06.md).
+- [x] **T3.07** Translations — M · deps: all UI tasks · i18n-translator · FR-I1, FR-I3
     - Fill zh-CN, my, th; native speakers review.
     - Done when: check-i18n passes with no English placeholders left.
-- [ ] **T3.08** Burmese and Thai input — S · deps: T1.13 · fe · FR-I8, FR-I9
+    - Status: done as drafts. All 403 keys are in zh-CN, my (Unicode) and th, and `node scripts/check-i18n.mjs --strict` passes; native-speaker review is still open (see Open questions). See [note](notes/T3.07.md).
+- [x] **T3.08** Burmese and Thai input — S · deps: T1.13 · fe · FR-I8, FR-I9
     - Zawgyi detection and conversion with myanmar-tools; visual check of every page in `my` and `th`.
     - Done when: a Zawgyi sample is saved as Unicode.
+    - Status: done. Every JSON write converts Zawgyi to Unicode in `call()` (myanmar-tools 1.1.3, loaded only for Burmese bodies), proven by e2e, and all 11 pages passed a visual check in `my` and `th` at 390px. See [note](notes/T3.08.md).
 - [ ] **T3.09** Cluster host — M · deps: none · ops
     - Ubuntu Server 24.04 LTS, k3s with `--disable traefik`, ufw (443 users, 6443 admins).
     - Done when: `kubectl get nodes` shows Ready.
 - [ ] **T3.10** NGINX Ingress — M · deps: T3.09 · be + ops · NFR-1, NFR-4, FR-A11
     - F5 NGINX Ingress Controller, company CA certificate, allow/deny for the company network, 100 MB body limit, SSE settings. Access logs must not include the X-Tracking-Token header.
     - Login limit (FR-A11), guest ticket limit (NFR-3) and audit IPs use `clientIP` (backend/internal/api/tickets.go), which is the TCP peer: behind the ingress that is NGINX for everyone. Go change needed: read `X-Forwarded-For` only from the trusted ingress address. Without it the per-IP limit counts every staff member as one IP, and 20 failures lock everyone out for 15 minutes.
+    - Go part done (2026-09-27): `TRUSTED_PROXIES` (comma-separated CIDRs, empty = trust nobody) makes `s.clientIP` take the right-most X-Forwarded-For entry that is not a trusted proxy, only when the TCP peer is trusted; `TestClientIP_FRA11`, `TestLoad_TrustedProxies_FRA11`; security review found no code defect. Ops still to do: set `TRUSTED_PROXIES` to the ingress pod CIDR only (never 0.0.0.0/0), and make NGINX append the socket peer (`$proxy_add_x_forwarded_for`), never pass a client's header through unchanged, or the right-most entry becomes attacker-controlled. Add `TRUSTED_PROXIES=` to .env.example by hand (agents cannot edit `.env*`).
     - Done when: HTTPS works, an outside IP is refused, and through the ingress 20 failed logins from client A leave client B able to sign in.
     - Add an NGINX request limit on `/api/track/*` (T2.14 accepted: the API itself does not limit it).
 - [ ] **T3.11** Vault — L · deps: T3.09 · ops · NFR-7
@@ -257,9 +262,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
 - [ ] **T3.12** Harbor, signing, Kyverno — M · deps: T3.11 · ops · NFR-10
     - Harbor project, Cosign key in Vault, Kyverno policies (signed Harbor images only, no root, limits required).
     - Done when: an unsigned image is refused by the cluster.
-- [ ] **T3.13** Kustomize manifests — L · deps: T1.20, T3.09 · ops
+- [x] **T3.13** Kustomize manifests — L · deps: T1.20, T3.09 · ops
     - Base and staging/prod overlays: app (2 replicas, probes), PostgreSQL StatefulSet, Redis, Gotenberg, PVCs, goose PreSync Job.
     - Done when: kube-linter and Trivy config pass.
+    - Status: done. deploy/base and the staging and prod overlays render with `kubectl kustomize`, and `make deploy-lint` (kube-linter and Trivy config from Docker) passes both with no suppressions; the migration Job is an Argo CD Sync hook in wave 1, not PreSync. See [note](notes/T3.13.md).
 - [ ] **T3.14** Argo CD and GitOps repo — M · deps: T3.13 · ops
     - Staging auto-sync, production manual sync.
     - Done when: a tag change in the GitOps repo rolls out to staging with no downtime.

@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -121,12 +123,29 @@ func summarize(details string) string {
 	return s
 }
 
-// clientIP is the TCP peer address.
-// ponytail: behind NGINX this is the proxy's IP; read X-Forwarded-For from trusted proxies in T3.10.
-func clientIP(r *http.Request) string {
+// clientIP is the address the per-IP limits (FR-A11, NFR-3) and audit_log use: the TCP peer, or, when the peer is in
+// TrustedProxies, the right-most X-Forwarded-For entry that is not a trusted proxy. Entries left of it are the
+// client's own claims and are never read. A malformed entry or an all-trusted chain gives the peer.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return ""
+	}
+	trusted := func(a netip.Addr) bool {
+		return slices.ContainsFunc(s.TrustedProxies, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
+	}
+	if peer, err := netip.ParseAddr(host); err != nil || !trusted(peer) {
+		return host
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			return host
+		}
+		if !trusted(a) {
+			return a.Unmap().String()
+		}
 	}
 	return host
 }
@@ -140,7 +159,6 @@ const (
 )
 
 // overGuestLimit counts one ticket request from ip and reports whether it is over the limit (NFR-3).
-// ponytail: behind NGINX clientIP is the ingress, so until T3.10 every guest shares one count.
 func (s *Server) overGuestLimit(ctx context.Context, ip string) (bool, error) {
 	sum := sha256.Sum256([]byte(ip))
 	key := "ratelimit:ticket:" + hex.EncodeToString(sum[:])
@@ -160,7 +178,7 @@ func (s *Server) overGuestLimit(ctx context.Context, ip string) (bool, error) {
 // POST /api/tickets — a guest opens a ticket (FR-G1).
 func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	// Counted before the body is read, so invalid requests count too (NFR-3).
-	switch over, err := s.overGuestLimit(r.Context(), clientIP(r)); {
+	switch over, err := s.overGuestLimit(r.Context(), s.clientIP(r)); {
 	case err != nil:
 		slog.Error("guest ticket limit", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -216,7 +234,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 			TicketID: &t.ID,
 			Target:   in.EmployeeID,
 			To:       "location:" + strconv.FormatInt(in.LocationID, 10),
-			IP:       clientIP(r),
+			IP:       s.clientIP(r),
 		})
 	})
 	switch {

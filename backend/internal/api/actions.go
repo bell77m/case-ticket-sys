@@ -71,7 +71,7 @@ func (s *Server) updateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actor, ip := audit.Staff(currentStaff(r).ID), clientIP(r)
+	actor, ip := audit.Staff(currentStaff(r).ID), s.clientIP(r)
 	err := s.withLockedTicket(r, t.ID, func(tx *gorm.DB, t *models.Ticket) error {
 		// Checked before any write, so a rejected status leaves priority and category unchanged too.
 		if in.Status != nil && !staffTransitions[[2]string{t.Status, *in.Status}] {
@@ -154,7 +154,7 @@ func (s *Server) assignTicket(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Model(t).Update("assignee_id", to).Error; err != nil {
 			return err
 		}
-		return audit.Record(tx, audit.Staff(me.ID), "ticket.assigned", audit.Change{TicketID: &t.ID, From: from, To: next, IP: clientIP(r)})
+		return audit.Record(tx, audit.Staff(me.ID), "ticket.assigned", audit.Change{TicketID: &t.ID, From: from, To: next, IP: s.clientIP(r)})
 	})
 	writeActionResult(w, err, "assign ticket")
 }
@@ -208,7 +208,7 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return audit.Record(tx, audit.Staff(me.ID), "comment.added", audit.Change{TicketID: &t.ID, To: visibility, IP: clientIP(r)})
+		return audit.Record(tx, audit.Staff(me.ID), "comment.added", audit.Change{TicketID: &t.ID, To: visibility, IP: s.clientIP(r)})
 	})
 	if err != nil {
 		writeActionResult(w, err, "add comment")

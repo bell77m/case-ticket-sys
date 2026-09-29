@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { axeBothSizes, guestTicket, signIn } from './helpers';
+import { expect, test, type Page } from '@playwright/test';
+import { axeBothSizes, signIn, ticketForEveryGraph } from './helpers';
 
 // T3.03 (FR-P1, FR-P2, FR-I5): the reports dashboard. Only report.view opens it; the API refuses the rest (FR-R3).
 
@@ -27,16 +27,6 @@ const graphCard = (page: Page, title: string) =>
 
 const sideways = (page: Page) =>
 	page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-
-/** Gives every graph data today: an urgent ticket assigned to the signed-in staff member, with a public reply. */
-async function ticketForEveryGraph(page: Page, request: APIRequestContext) {
-	const { id } = await guestTicket(request, 'The barcode scanner at the packing line stopped reading labels.');
-	const me = await (await page.request.get('/api/auth/me')).json();
-	expect((await page.request.patch(`/api/staff/tickets/${id}`, { data: { priority: 'urgent' } })).ok()).toBe(true);
-	expect((await page.request.put(`/api/staff/tickets/${id}/assignee`, { data: { assignee_id: me.id } })).ok()).toBe(true);
-	const reply = await page.request.post(`/api/staff/tickets/${id}/comments`, { data: { body: 'Looking into it.', internal: false } });
-	expect(reply.ok()).toBe(true);
-}
 
 test('root sees the cards, the summary and 7 graphs, each with a table view', async ({ page, request }) => {
 	test.slow(); // seven toggles, two viewports and two axe runs

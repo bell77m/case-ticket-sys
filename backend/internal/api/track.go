@@ -176,11 +176,11 @@ func (s *Server) trackReply(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&c).Error; err != nil {
 			return err
 		}
-		if err := audit.Record(tx, audit.Guest, "comment.added", audit.Change{TicketID: &t.ID, IP: clientIP(r)}); err != nil {
+		if err := audit.Record(tx, audit.Guest, "comment.added", audit.Change{TicketID: &t.ID, IP: s.clientIP(r)}); err != nil {
 			return err
 		}
 		if t.Status == models.StatusWaiting || t.Status == models.StatusResolved {
-			return setStatus(tx, t, models.StatusInProgress, audit.Guest, clientIP(r))
+			return setStatus(tx, t, models.StatusInProgress, audit.Guest, s.clientIP(r))
 		}
 		return nil
 	})
@@ -205,7 +205,7 @@ func (s *Server) trackConfirm(w http.ResponseWriter, r *http.Request) {
 		if t.Status != models.StatusResolved {
 			return errNotResolved
 		}
-		return setStatus(tx, t, models.StatusClosed, audit.Guest, clientIP(r))
+		return setStatus(tx, t, models.StatusClosed, audit.Guest, s.clientIP(r))
 	})
 	switch {
 	case errors.Is(err, errNotResolved):

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/netip"
 
 	"gorm.io/gorm"
 
@@ -22,6 +23,11 @@ type Server struct {
 	SecureCookies bool // BASE_URL is https, so cookies get the Secure flag
 	// GuestTicketLimit is guest tickets per IP per 10 minutes (NFR-3); 0 means 5.
 	GuestTicketLimit int
+	// GotenbergURL and PrintBaseURL enable the PDF export (FR-P4); if either is empty it answers 503.
+	GotenbergURL string
+	PrintBaseURL string
+	// TrustedProxies are the ingress CIDRs whose X-Forwarded-For clientIP believes (FR-A11, NFR-3); nil trusts nobody.
+	TrustedProxies []netip.Prefix
 }
 
 // Routes registers every /api route on mux (an *http.ServeMux; tests pass a recorder to list the routes).
@@ -41,6 +47,8 @@ func (s *Server) Routes(mux interface {
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.requireSession(s.me))
 	mux.HandleFunc("POST /api/auth/password", s.requireSession(s.changePassword)) // works with a temporary password (FR-A8)
+	mux.HandleFunc("GET /api/print/report", s.printReport)                        // Gotenberg has no session; a one-time token instead (FR-P4)
+	mux.HandleFunc("GET /api/print/activity", s.printActivity)                    // same, for the activity log PDF
 
 	// Staff endpoints: every one goes through require(permission) (FR-R3).
 	mux.HandleFunc("GET /api/staff/tickets", s.require(rbac.TicketViewAll, s.queue))
@@ -51,6 +59,9 @@ func (s *Server) Routes(mux interface {
 	mux.HandleFunc("GET /api/staff/assignees", s.require(rbac.TicketAssign, s.assignees))
 	mux.HandleFunc("POST /api/staff/tickets/{id}/comments", s.require(rbac.TicketComment, s.addComment))
 	mux.HandleFunc("GET /api/staff/reports", s.require(rbac.ReportView, s.reports))
+	mux.HandleFunc("POST /api/staff/reports/export", s.require(rbac.ReportView, s.exportReport))
+	mux.HandleFunc("GET /api/staff/activity", s.require(rbac.AuditView, s.activity))
+	mux.HandleFunc("POST /api/staff/activity/export", s.require(rbac.AuditView, s.exportActivity))
 	mux.HandleFunc("GET /api/staff/accounts", s.require(rbac.StaffManage, s.staffAccounts))
 	mux.HandleFunc("POST /api/staff/accounts", s.require(rbac.StaffCreate, s.createStaff)) // Root Admin only (FR-A1)
 	mux.HandleFunc("PATCH /api/staff/accounts/{id}", s.require(rbac.StaffManage, s.updateStaff))

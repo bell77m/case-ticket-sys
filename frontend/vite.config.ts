@@ -37,7 +37,14 @@ export default defineConfig({
 			}
 		}
 	],
+	// Loaded only on the first Burmese submit (FR-I8); found that late, the dev server would reload the page mid-submit.
+	optimizeDeps: { include: ['myanmar-tools'] },
 	server: {
+		// PDF export (FR-P4): Gotenberg's Chromium, in Docker, opens /print/report as host.docker.internal:5173
+		// (PRINT_BASE_URL). Docker Desktop forwards that to the host's 127.0.0.1, while "localhost" binds only ::1 on
+		// Windows; 127.0.0.1 keeps the dev server off the network.
+		host: '127.0.0.1',
+		allowedHosts: ['host.docker.internal'],
 		proxy: {
 			'/api': {
 				target: api,

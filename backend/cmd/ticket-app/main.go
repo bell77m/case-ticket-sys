@@ -107,6 +107,9 @@ func main() {
 		Sessions:         &auth.Sessions{Redis: rdb},
 		SecureCookies:    strings.HasPrefix(base, "https://"),
 		GuestTicketLimit: cfg.GuestTicketLimit,
+		GotenbergURL:     cfg.GotenbergURL,
+		PrintBaseURL:     cfg.PrintBaseURL,
+		TrustedProxies:   cfg.TrustedProxies,
 	}
 	srv := newServer(cfg.HTTPAddr, newMux(app))
 	slog.Info("listening", "addr", cfg.HTTPAddr)

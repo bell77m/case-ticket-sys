@@ -101,3 +101,70 @@ func TestLoad_NoSMTP(t *testing.T) {
 		t.Errorf("Load() with only SMTP_ADDR = %v, want no error", err)
 	}
 }
+
+// FR-A11, NFR-3: TRUSTED_PROXIES is a comma-separated CIDR list; empty trusts nobody, a bad entry is an error.
+func TestLoad_TrustedProxies_FRA11(t *testing.T) {
+	tests := []struct {
+		name, v string
+		want    []string
+		wantErr bool
+	}{
+		{"unset", "", nil, false},
+		{"one", "10.0.0.0/8", []string{"10.0.0.0/8"}, false},
+		{"list with spaces and IPv6", " 10.0.0.0/8 , fd00::/8,", []string{"10.0.0.0/8", "fd00::/8"}, false},
+		{"bare IP", "10.0.0.1", nil, true},
+		{"garbage", "10.0.0.0/8,proxy", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := valid()
+			m["TRUSTED_PROXIES"] = tt.v
+			cfg, err := Load(env(m))
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "TRUSTED_PROXIES") {
+					t.Errorf("Load() error = %v, want one naming TRUSTED_PROXIES", err)
+				}
+				return
+			}
+			if err != nil || len(cfg.TrustedProxies) != len(tt.want) {
+				t.Fatalf("Load() = %v, %v; want %v", cfg.TrustedProxies, err, tt.want)
+			}
+			for i, p := range cfg.TrustedProxies {
+				if p.String() != tt.want[i] {
+					t.Errorf("TrustedProxies[%d] = %s, want %s", i, p, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// FR-P4: the PDF export settings are optional (export answers 503 without them); when set they are absolute http(s) URLs.
+func TestLoad_PDF_FRP4(t *testing.T) {
+	tests := []struct {
+		name, gotenberg, printBase string
+		wantErr                    string // "" = valid
+	}{
+		{"unset", "", "", ""},
+		{"dev", "http://localhost:3000", "http://host.docker.internal:5173", ""},
+		{"cluster", "http://gotenberg:3000", "https://ticket-app.tickets.svc/", ""},
+		{"gotenberg without scheme", "gotenberg:3000", "", "GOTENBERG_URL"},
+		{"print base relative", "", "/print", "PRINT_BASE_URL"},
+		{"print base not http", "", "ftp://app", "PRINT_BASE_URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := valid()
+			m["GOTENBERG_URL"], m["PRINT_BASE_URL"] = tt.gotenberg, tt.printBase
+			cfg, err := Load(env(m))
+			if tt.wantErr == "" {
+				if err != nil || cfg.GotenbergURL != tt.gotenberg || cfg.PrintBaseURL != tt.printBase {
+					t.Errorf("Load() = %q %q, %v; want the values and no error", cfg.GotenbergURL, cfg.PrintBaseURL, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Load() error = %v, want one naming %s", err, tt.wantErr)
+			}
+		})
+	}
+}

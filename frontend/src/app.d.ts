@@ -12,6 +12,10 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+	interface Window {
+		/** Set by the /print/ pages once drawn with their fonts; Gotenberg prints then (FR-P4). */
+		printReady?: boolean;
+	}
 }
 
 export {};

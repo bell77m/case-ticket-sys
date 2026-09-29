@@ -135,7 +135,7 @@ func (s *Server) createCategory(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&c).Error; err != nil {
 			return err
 		}
-		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "category.created", audit.Change{Target: c.Name["en"], IP: clientIP(r)})
+		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "category.created", audit.Change{Target: c.Name["en"], IP: s.clientIP(r)})
 	})
 	if err != nil {
 		writeLookupError(w, err, "category")
@@ -195,7 +195,7 @@ func (s *Server) updateCategory(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Select("name", "is_active").Updates(&c).Error; err != nil {
 			return err
 		}
-		actor, ip := audit.Staff(currentStaff(r).ID), clientIP(r)
+		actor, ip := audit.Staff(currentStaff(r).ID), s.clientIP(r)
 		if renamed {
 			change := audit.Change{Target: c.Name["en"], From: old.Name["en"], To: c.Name["en"], IP: ip}
 			if err := audit.Record(tx, actor, "category.changed", change); err != nil {
@@ -256,7 +256,7 @@ func (s *Server) createLocation(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&l).Error; err != nil {
 			return err
 		}
-		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "location.created", audit.Change{Target: locationLabel(l), IP: clientIP(r)})
+		return audit.Record(tx, audit.Staff(currentStaff(r).ID), "location.created", audit.Change{Target: locationLabel(l), IP: s.clientIP(r)})
 	})
 	if err != nil {
 		writeLookupError(w, err, "location")
@@ -325,7 +325,7 @@ func (s *Server) updateLocation(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Select("building", "floor", "line", "is_active").Updates(&l).Error; err != nil {
 			return err
 		}
-		actor, ip := audit.Staff(currentStaff(r).ID), clientIP(r)
+		actor, ip := audit.Staff(currentStaff(r).ID), s.clientIP(r)
 		if renamed {
 			change := audit.Change{Target: locationLabel(l), From: locationLabel(old), To: locationLabel(l), IP: ip}
 			if err := audit.Record(tx, actor, "location.changed", change); err != nil {
