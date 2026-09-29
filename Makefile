@@ -97,9 +97,9 @@ cluster-vault: deploy/overlays/local/secrets.env deploy/overlays/local/tls/tls.c
 cluster-vault-tls: deploy/overlays/local/tls/vault.crt
 	for n in vault vault-secrets-operator-system; do kubectl $(KCTX) create namespace $$n --dry-run=client -o yaml | kubectl $(KCTX) apply -f - >/dev/null; done
 	cd deploy/overlays/local/tls && kubectl $(KCTX) -n vault create secret generic vault-tls --from-file=tls.crt=vault.crt \
-		--from-file=tls.key=vault.key --from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply -f -
+		--from-file=tls.key=vault.key --from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply --server-side -f -
 	cd deploy/overlays/local/tls && kubectl $(KCTX) -n vault-secrets-operator-system create secret generic vault-ca \
-		--from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply -f -
+		--from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply --server-side -f -
 
 deploy/overlays/local/tls/vault.crt: deploy/overlays/local/tls/tls.crt
 	MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes -subj "/CN=vault" -keyout $(@D)/vault.key -out $(@D)/vault.csr
@@ -125,7 +125,7 @@ cluster-images:
 	for i in $(LOCAL_THIRD_PARTY); do docker image inspect $$i >/dev/null 2>&1 || docker pull $$i || exit 1; done
 	k3d image import -c ticket-local ticket-app:local ticket-migrate:local $(LOCAL_THIRD_PARTY)
 
-# Random passwords, written once; the file is gitignored and read by the local overlay's secretGenerator.
+# Random passwords, written once; the file is gitignored and loaded into the local Vault by deploy/local/vault-setup.sh.
 deploy/overlays/local/secrets.env:
 	node -e 'const r=()=>require("crypto").randomBytes(16).toString("hex");const o=r(),a=r(),d=r();process.stdout.write(["POSTGRES_PASSWORD="+o,"TICKET_APP_DB_PASSWORD="+a,"REDIS_PASSWORD="+d,"DATABASE_URL=postgres://ticket_app:"+a+"@postgres:5432/ticket?sslmode=disable","MIGRATE_DATABASE_URL=postgres://ticket:"+o+"@postgres:5432/ticket?sslmode=disable","REDIS_URL=redis://:"+d+"@redis:6379/0",""].join("\n"))' > $@
 
@@ -153,3 +153,23 @@ cluster-check-ingress:
 
 cluster-down:
 	k3d cluster delete ticket-local
+
+# Argo CD (T3.14): install, give it a read-only deploy key for this repo (private half only in a cluster Secret and in
+# the gitignored deploy/local/argocd-deploy-key), then the projects and the local Application. The staging and prod
+# Applications (deploy/argocd/staging.yaml, prod.yaml) belong on the T3.09 host, not here.
+ARGOCD_CHART_VERSION := 10.9.2
+ARGOCD_REPO := git@github.com:bell77m/case-ticket-sys.git
+.PHONY: cluster-argocd
+cluster-argocd: deploy/local/argocd-deploy-key
+	helm repo add argo https://argoproj.github.io/argo-helm --force-update
+	helm upgrade --install argocd argo/argo-cd --version $(ARGOCD_CHART_VERSION) \
+		$(HELM_LOCAL) -n argocd -f deploy/platform/argocd-values.yaml --wait
+	kubectl $(KCTX) -n argocd create secret generic repo-ticket --from-literal=type=git --from-literal=url=$(ARGOCD_REPO) \
+		--from-file=sshPrivateKey=deploy/local/argocd-deploy-key --dry-run=client -o yaml \
+		| kubectl label --local -f - argocd.argoproj.io/secret-type=repository -o yaml | kubectl $(KCTX) apply --server-side -f -
+	kubectl $(KCTX) apply -f deploy/argocd/project.yaml -f deploy/argocd/local/ticket-local.yaml
+
+# A read-only deploy key, registered once on GitHub (needs `gh` signed in). Revoke it in the repo's Deploy keys page.
+deploy/local/argocd-deploy-key:
+	ssh-keygen -q -t ed25519 -N "" -C "argocd ticket-local (k3d)" -f $@
+	gh repo deploy-key add $@.pub --repo bell77m/case-ticket-sys --title "argocd ticket-local (k3d), read-only"

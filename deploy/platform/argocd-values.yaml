@@ -1,0 +1,12 @@
+# Argo CD (T3.14, docs/ARCHITECTURE.md), Helm chart argo/argo-cd 10.9.2 (Argo CD v3.5.3). It pulls the manifests
+# from Git (deploy/argocd/*.yaml), so CI never holds cluster credentials. Staging syncs by itself; prod only by hand.
+# Admin access: `kubectl -n argocd port-forward svc/argocd-server 8080:443`; the first admin password is in Secret
+# argocd-initial-admin-secret (change it, then delete that Secret).
+dex:
+  enabled: false
+notifications:
+  enabled: false
+configs:
+  cm:
+    # Look at Git every minute (default 3 min), so a digest bump from cd.yml reaches staging quickly.
+    timeout.reconciliation: 60s

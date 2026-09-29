@@ -1,0 +1,18 @@
+# Production: never automatic. Someone sets the release tag in deploy/overlays/prod and presses Sync (manual approval).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ticket-prod
+  namespace: argocd
+spec:
+  project: ticket-prod
+  source:
+    repoURL: git@github.com:bell77m/case-ticket-sys.git
+    targetRevision: main
+    path: deploy/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ticket-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

@@ -17,6 +17,7 @@ backend/uploads/
 deploy/overlays/local/secrets.env
 deploy/overlays/local/tls/
 deploy/local/vault-init.json
+deploy/local/argocd-deploy-key*
 
 # Tool state
 .remember/

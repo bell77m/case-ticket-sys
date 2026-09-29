@@ -1,0 +1,21 @@
+# Staging: every merge to main, automatically; drift is corrected and removed objects are pruned.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ticket-staging
+  namespace: argocd
+spec:
+  project: ticket-staging
+  source:
+    repoURL: git@github.com:bell77m/case-ticket-sys.git
+    targetRevision: main
+    path: deploy/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ticket-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

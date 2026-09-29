@@ -1,0 +1,72 @@
+# Argo CD for the ticket system (T3.14). The GitOps source is this repository's deploy/overlays (interim choice of
+# 2026-09-28; cd.yml commits new staging digests there). Argo CD reads it with a read-only deploy key (repository
+# Secret, never in Git; docs/notes/T3.14.md).
+#
+# One project per environment, so the staging project can never target prod. Both allow only the kinds deploy/base
+# uses: no Secret (they come from Vault through VSO), no Role or RoleBinding, so a commit to main (the CD bot can
+# write there) cannot plant credentials or grant permissions. A new kind in deploy/base must be added to both lists.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ticket-staging
+  namespace: argocd
+spec:
+  description: IT ticket system, staging (and the local k3d test cluster)
+  sourceRepos:
+    - git@github.com:bell77m/case-ticket-sys.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ticket-staging
+    - server: https://kubernetes.default.svc
+      namespace: ticket-local
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+  namespaceResourceWhitelist:
+    - { group: "", kind: ConfigMap }
+    - { group: "", kind: PersistentVolumeClaim }
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: apps, kind: Deployment }
+    - { group: apps, kind: StatefulSet }
+    - { group: batch, kind: Job }
+    - { group: networking.k8s.io, kind: Ingress }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: k8s.nginx.org, kind: Policy }
+    - { group: secrets.hashicorp.com, kind: VaultAuth }
+    - { group: secrets.hashicorp.com, kind: VaultStaticSecret }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ticket-prod
+  namespace: argocd
+spec:
+  description: IT ticket system, production (manual sync only)
+  sourceRepos:
+    - git@github.com:bell77m/case-ticket-sys.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ticket-prod
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+  namespaceResourceWhitelist:
+    - { group: "", kind: ConfigMap }
+    - { group: "", kind: PersistentVolumeClaim }
+    - { group: "", kind: Service }
+    - { group: "", kind: ServiceAccount }
+    - { group: apps, kind: Deployment }
+    - { group: apps, kind: StatefulSet }
+    - { group: batch, kind: Job }
+    - { group: networking.k8s.io, kind: Ingress }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: k8s.nginx.org, kind: Policy }
+    - { group: secrets.hashicorp.com, kind: VaultAuth }
+    - { group: secrets.hashicorp.com, kind: VaultStaticSecret }
+  # Always-open deny window: automated sync and self-heal never run in prod, even if an Application turns them on;
+  # manualSync lets an admin still press Sync (the release approval).
+  syncWindows:
+    - kind: deny
+      schedule: "0 0 * * *"
+      duration: 24h
+      applications: ["*"]
+      manualSync: true

@@ -268,13 +268,14 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Base and staging/prod overlays: app (2 replicas, probes), PostgreSQL StatefulSet, Redis, Gotenberg, PVCs, goose PreSync Job.
     - Done when: kube-linter and Trivy config pass.
     - Status: done. deploy/base and the staging and prod overlays render with `kubectl kustomize`, and `make deploy-lint` (kube-linter and Trivy config from Docker) passes both with no suppressions; the migration Job is an Argo CD Sync hook in wave 1, not PreSync. See [note](notes/T3.13.md).
-- [ ] **T3.14** Argo CD and GitOps repo — M · deps: T3.13 · ops
+- [x] **T3.14** Argo CD and GitOps repo — M · deps: T3.13 · ops
     - Staging auto-sync, production manual sync.
     - Done when: a tag change in the GitOps repo rolls out to staging with no downtime.
+    - Status: done. Argo CD v3.5.3 with per-environment AppProjects (prod manual only, enforced by a deny sync window) pulls this repo's overlays through a read-only deploy key; on the local k3d cluster a tag change on a branch rolled out with 198 of 198 `/healthz` checks answering 200. Still to do on the T3.09 host: install and apply `deploy/argocd`, and named accounts for prod approvers. See [note](notes/T3.14.md).
 - [ ] **T3.15** CI pipeline, part 2 — M · deps: T1.21, T3.12, T3.14 · ops
     - Build, Syft SBOM, Trivy image scan, Cosign sign, push to Harbor, update GitOps tag, ZAP baseline on staging; CI secrets from Vault JWT auth.
     - Done when: a merge to main reaches staging with no manual step.
-    - Status: interim pipeline built (2026-09-28): .github/workflows/cd.yml builds, scans, pushes to GHCR, signs keyless and commits the staging digests after each green CI run on main. Still to do once the platform exists: Harbor instead of GHCR (T3.12), Vault JWT instead of the GitHub token (T3.11), ZAP baseline on staging and the Argo CD rollout (T3.14). See [note](notes/2026-09-28-ci-cd.md).
+    - Status: interim pipeline built (2026-09-28): .github/workflows/cd.yml builds, scans, pushes to GHCR, signs keyless and commits the staging digests after each green CI run on main. Still to do once the platform exists: Harbor instead of GHCR (T3.12), Vault JWT instead of the GitHub token (T3.11), ZAP baseline on staging. Argo CD (T3.14) picks up the digest commit. See [note](notes/2026-09-28-ci-cd.md).
 - [ ] **T3.16** Backups and restore test — M · deps: T3.13 · ops · NFR-8
     - Nightly CronJob: pg_dump and uploads to NFS; documented restore steps.
     - Done when: a restore into a scratch namespace brings back tickets and evidence.

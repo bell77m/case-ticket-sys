@@ -1,0 +1,20 @@
+# Local k3d cluster only (make cluster-argocd): the local overlay, synced automatically like staging. Uses the
+# AppProject ticket-staging in ../project.yaml. The T3.14 rollout check points targetRevision at a throwaway test branch.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ticket-local
+  namespace: argocd
+spec:
+  project: ticket-staging
+  source:
+    repoURL: git@github.com:bell77m/case-ticket-sys.git
+    targetRevision: main
+    path: deploy/overlays/local
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ticket-local
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
