@@ -14,7 +14,6 @@ export const actionLabels: Record<string, () => string> = {
 	'ticket.category_changed': m.activity_action_ticket_category_changed,
 	'ticket.assigned': m.activity_action_ticket_assigned,
 	'ticket.auto_closed': m.activity_action_ticket_auto_closed,
-	'ticket.deleted': m.activity_action_ticket_deleted,
 	'comment.added': m.activity_action_comment_added,
 	'attachment.added': m.activity_action_attachment_added,
 	'category.created': m.activity_action_category_created,

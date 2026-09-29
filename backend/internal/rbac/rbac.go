@@ -6,7 +6,6 @@ const (
 	TicketComment  = "ticket.comment"
 	TicketUpdate   = "ticket.update"
 	TicketAssign   = "ticket.assign"
-	TicketDelete   = "ticket.delete"
 	ReportView     = "report.view"
 	AuditView      = "audit.view"
 	CategoryManage = "category.manage"
@@ -17,6 +16,6 @@ const (
 
 // All is every permission, in the order of the table in docs/REQUIREMENTS.md.
 var All = []string{
-	TicketViewAll, TicketComment, TicketUpdate, TicketAssign, TicketDelete,
+	TicketViewAll, TicketComment, TicketUpdate, TicketAssign,
 	ReportView, AuditView, CategoryManage, StaffManage, StaffCreate, RoleManage,
 }

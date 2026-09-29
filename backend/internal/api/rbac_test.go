@@ -29,7 +29,7 @@ func TestRequire_FRR2(t *testing.T) {
 	e.requireMux()
 	want := map[string][]string{ // same table as migrations.TestDefaultRoles_FRR2
 		"Root Admin": rbac.All,
-		"Admin": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign", "ticket.delete",
+		"Admin": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign",
 			"report.view", "audit.view", "category.manage", "staff.manage"},
 		"Team Lead": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign",
 			"report.view", "audit.view", "category.manage"},

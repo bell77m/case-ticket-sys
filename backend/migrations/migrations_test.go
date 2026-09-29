@@ -132,13 +132,54 @@ func TestRootOnlyPermissions_FRA3(t *testing.T) {
 	}
 }
 
+// FR-R2, FR-L1: ticket.delete is gone (no requirement builds ticket deletion; decision of 2026-09-29). No role holds
+// it, it can no longer be granted, and its removal from each default role is in the activity log.
+func TestTicketDeleteDropped_FRR2(t *testing.T) {
+	ctx := context.Background()
+	conn := connect(t)
+	var held int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM role_permissions WHERE permission = 'ticket.delete'`).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held != 0 {
+		t.Errorf("roles holding ticket.delete = %d, want 0", held)
+	}
+	var logged []string
+	rows, err := conn.Query(ctx, `SELECT DISTINCT target FROM audit_log
+		WHERE actor_type = 'system' AND action = 'role.changed' AND from_value = 'ticket.delete' ORDER BY target`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var target string
+		if err := rows.Scan(&target); err != nil {
+			t.Fatal(err)
+		}
+		logged = append(logged, target)
+	}
+	if !slices.Equal(logged, []string{"Admin", "Root Admin"}) {
+		t.Errorf("audited removals = %v, want [Admin Root Admin]", logged)
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `INSERT INTO role_permissions (role_id, permission)
+		SELECT id, 'ticket.delete' FROM roles WHERE name = 'Admin'`)
+	if err == nil || !strings.Contains(err.Error(), "role_permissions_permission_check") {
+		t.Errorf("grant ticket.delete: err = %v, want role_permissions_permission_check", err)
+	}
+}
+
 // FR-R2: default roles and permissions match the table in docs/REQUIREMENTS.md.
 func TestDefaultRoles_FRR2(t *testing.T) {
 	ctx := context.Background()
 	conn := connect(t)
 	want := map[string][]string{
 		"Root Admin": rbac.All,
-		"Admin": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign", "ticket.delete",
+		"Admin": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign",
 			"report.view", "audit.view", "category.manage", "staff.manage"},
 		"Team Lead": {"ticket.view_all", "ticket.comment", "ticket.update", "ticket.assign",
 			"report.view", "audit.view", "category.manage"},

@@ -6,7 +6,6 @@ export const permissions: [string, () => string][] = [
 	['ticket.comment', m.perm_ticket_comment],
 	['ticket.update', m.perm_ticket_update],
 	['ticket.assign', m.perm_ticket_assign],
-	['ticket.delete', m.perm_ticket_delete],
 	['report.view', m.perm_report_view],
 	['audit.view', m.perm_audit_view],
 	['category.manage', m.perm_category_manage],

@@ -26,13 +26,14 @@ Default roles:
 | ticket.comment (public reply, internal note) | Yes | Yes | Yes | Yes | — |
 | ticket.update (status, priority, category) | Yes | Yes | Yes | Yes | — |
 | ticket.assign | Yes | Yes | Yes | Self only | — |
-| ticket.delete | Yes | Yes | — | — | — |
 | report.view | Yes | Yes | Yes | — | Yes |
 | audit.view (activity log) | Yes | Yes | Yes | — | — |
 | category.manage (categories and locations) | Yes | Yes | Yes | — | — |
 | staff.manage (deactivate, set role) | Yes | Yes | — | — | — |
 | staff.create | Yes | — | — | — | — |
 | role.manage | Yes | — | — | — | — |
+
+Tickets are never deleted: there is no ticket.delete permission (dropped on 2026-09-29, migration 00005, because no feature used it). A ticket ends as Closed and stays in the history.
 
 ### Staff accounts
 
@@ -126,7 +127,6 @@ Staff (username and password):
 | ticket.assigned | Who, old and new assignee |
 | ticket.priority_changed, ticket.category_changed | Who, old and new value |
 | ticket.auto_closed | Actor "system" |
-| ticket.deleted | Who, ticket summary |
 | staff.created, staff.deactivated, staff.role_changed | Who, which account, old and new role |
 | staff.password_changed, staff.password_reset | Who, which account, IP address (never the password) |
 | role.changed | Who, permissions added and removed |
