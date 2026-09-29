@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axeBothSizes, signIn } from './helpers';
+import { baseURL, axeBothSizes, signIn } from './helpers';
 
 // T2.11 (FR-I4): a line added in the admin page shows in the guest form in all four languages; a deactivated line
 // leaves it. Each run adds its own building and floor, so it cannot clash with seed data. The line is left
@@ -15,7 +15,7 @@ async function fillNames(page: Page, legend: string, names: Names) {
 
 /** The guest form in one language; returns its building, floor and line selects. */
 async function openReport(page: Page, locale: string) {
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 	await page.goto('/report');
 	await expect(page.locator('html')).toHaveAttribute('lang', locale);
 	return page.locator('select');
@@ -86,7 +86,7 @@ test('a new line shows in the guest form in every language until it is deactivat
 		}
 
 		// Deactivated: the line stays in the admin list, muted, and leaves the guest form.
-		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', url: 'http://localhost:5173' }]);
+		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', url: baseURL }]);
 		await page.goto('/staff/admin/lookups');
 		await row.getByRole('button', { name: 'Deactivate' }).click();
 		const dialog = page.getByRole('dialog');

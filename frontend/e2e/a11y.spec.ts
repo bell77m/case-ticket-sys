@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { baseURL } from './helpers';
 
 const axeSource = readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
 
@@ -10,7 +11,7 @@ for (const [name, path] of [
 ]) {
 	for (const locale of ['en', 'my']) {
 		test(`${name} accessibility (${locale})`, async ({ page, context }) => {
-			await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+			await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 			await page.goto(path);
 			await page.getByRole('heading', { level: 1 }).waitFor();
 			await page.addScriptTag({ content: axeSource });

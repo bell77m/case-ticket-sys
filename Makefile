@@ -37,6 +37,13 @@ build:
 	find backend/web/dist -mindepth 1 ! -name README.txt -delete && cp -r frontend/build/. backend/web/dist/
 	cd backend && go build -o bin/ticket-app ./cmd/ticket-app
 
+# The app as CI's e2e job runs it: the Go binary serving the built SPA on :8080 (keeps /dev/components for
+# summary.spec). Test it with: cd frontend && E2E_BASE_URL=http://localhost:8080 npx playwright test
+.PHONY: serve-built
+serve-built:
+	VITE_SHOW_DEV_PAGES=1 $(MAKE) build
+	BASE_URL=http://localhost:8080 GUEST_TICKET_LIMIT=1000 PRINT_BASE_URL=http://host.docker.internal:8080 backend/bin/ticket-app
+
 migrate:
 	goose -dir backend/migrations postgres "$(MIGRATE_DATABASE_URL)" up
 

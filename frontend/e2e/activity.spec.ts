@@ -1,12 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { axeBothSizes, devPassword, guestTicket, signIn } from './helpers';
+import { baseURL, axeBothSizes, devPassword, guestTicket, signIn } from './helpers';
 
 // T3.06 (FR-L1, FR-I6, FR-P4): the activity log needs audit.view. Done when an Agent gets 403 and a Team Lead sees
 // the log. No Team Lead is seeded, so root adds one through the API for this file and deactivates it at the end.
 
 const msg = (locale: string, key: string) => JSON.parse(readFileSync(`messages/${locale}.json`, 'utf8'))[key] as string;
-const baseURL = 'http://localhost:5173';
+// baseURL comes from helpers.ts
 const stamp = Date.now();
 const lead = { id: 0, username: `e2e-lead-${stamp}`, name: `E2E Lead ${stamp}`, password: 'e2e-own-password-1' };
 let root: APIRequestContext;

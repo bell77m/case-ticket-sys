@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { baseURL } from './helpers';
 
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), Buffer.from('JFIF'), Buffer.alloc(2000, 1)]);
 const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(3000, 2)]);
@@ -98,7 +99,8 @@ test('tracking card shows link, copy button and QR code', async ({ page, context
 	await page.getByRole('button', { name: 'Submit ticket' }).click();
 
 	const link = page.getByLabel('Your tracking link');
-	await expect(link).toHaveValue(/^http:\/\/localhost:5173\/track#[A-Za-z0-9_-]{43}$/);
+	const origin = baseURL.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+	await expect(link).toHaveValue(new RegExp(`^${origin}/track#[A-Za-z0-9_-]{43}$`));
 	const url = await link.inputValue();
 
 	await page.getByRole('button', { name: 'Copy link' }).click();

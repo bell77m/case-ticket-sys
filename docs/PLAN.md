@@ -272,6 +272,7 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
 - [ ] **T3.15** CI pipeline, part 2 — M · deps: T1.21, T3.12, T3.14 · ops
     - Build, Syft SBOM, Trivy image scan, Cosign sign, push to Harbor, update GitOps tag, ZAP baseline on staging; CI secrets from Vault JWT auth.
     - Done when: a merge to main reaches staging with no manual step.
+    - Status: interim pipeline built (2026-09-28): .github/workflows/cd.yml builds, scans, pushes to GHCR, signs keyless and commits the staging digests after each green CI run on main. Still to do once the platform exists: Harbor instead of GHCR (T3.12), Vault JWT instead of the GitHub token (T3.11), ZAP baseline on staging and the Argo CD rollout (T3.14). See [note](notes/2026-09-28-ci-cd.md).
 - [ ] **T3.16** Backups and restore test — M · deps: T3.13 · ops · NFR-8
     - Nightly CronJob: pg_dump and uploads to NFS; documented restore steps.
     - Done when: a restore into a scratch namespace brings back tickets and evidence.

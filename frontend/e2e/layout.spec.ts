@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { guestTicket, signIn } from './helpers';
+import { baseURL, guestTicket, signIn } from './helpers';
 
 // FR-T2, FR-I1: the queue summary stays readable and the page never scrolls sideways, in every language.
 // At 768px seven table columns squeezed the summary to one word per line and overflowed in Burmese.
@@ -9,7 +9,7 @@ test('queue summary is readable at tablet widths in all languages', async ({ pag
 	await signIn(page, 'agent');
 	await page.waitForURL('**/staff');
 	for (const locale of ['en', 'zh-CN', 'my', 'th']) {
-		await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+		await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 		for (const width of [768, 1024]) {
 			await page.setViewportSize({ width, height: 900 });
 			await page.goto('/staff');
@@ -32,7 +32,7 @@ test('no sideways scroll at 320px in all languages', async ({ page, context }) =
 	await page.waitForURL('**/staff');
 	await page.setViewportSize({ width: 320, height: 700 });
 	for (const locale of ['en', 'zh-CN', 'my', 'th']) {
-		await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: 'http://localhost:5173' }]);
+		await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 		for (const path of ['/', '/report', '/staff']) {
 			await page.goto(path);
 			await page.getByRole('heading', { level: 1 }).waitFor();

@@ -1,6 +1,9 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
+/** Where the app under test runs: Vite locally, the Go binary with the built SPA in CI (playwright.config.ts). */
+export const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+
 /** The password `make seed` gives the dev staff root, agent and viewer. */
 export const devPassword = 'dev-password';
 
