@@ -152,6 +152,16 @@ jobs:
           path: frontend/test-results/
           retention-days: 7
 
+  # kube-linter and Trivy config on the rendered staging and prod manifests (T3.13). Without it a deploy change
+  # (such as cd.yml's GHCR digests) can break the checks unnoticed.
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: make deploy-lint
+        run: make deploy-lint
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

@@ -1,5 +1,7 @@
-# Check data for `trivy config --config-data` (make deploy-lint): KSV-0125 accepts images only from our Harbor.
-# Placeholder host until T3.12; keep it equal to the Harbor host in the kustomizations.
+# Check data for `trivy config --config-data` (make deploy-lint): KSV-0125 accepts images only from these registries.
+# Harbor (placeholder host until T3.12; keep it equal to the Harbor host in the kustomizations) and, until then, GHCR,
+# where cd.yml pushes the signed app images (docs/notes/2026-09-28-ci-cd.md). Drop ghcr.io once Harbor is in use.
 ksv0125:
   trusted_registries:
     - harbor.example.internal
+    - ghcr.io

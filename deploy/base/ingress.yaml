@@ -1,0 +1,98 @@
+# HTTPS entry for the app through the F5 NGINX Ingress Controller (T3.10; deploy/platform/nginx-ingress-values.yaml).
+# A mergeable Ingress: the master holds the host, the TLS certificate and the company-network allow list; each
+# minion sets what its paths need. Overlays set the host and the allowed networks (placeholders here).
+apiVersion: k8s.nginx.org/v1
+kind: Policy
+metadata:
+  name: company-network
+spec:
+  # NFR-4: the app answers only the company network. Placeholder; each overlay patches in the real ranges.
+  accessControl:
+    allow:
+      - 192.0.2.0/24 # TEST-NET-1 placeholder: allows nobody real until an overlay sets the company ranges
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticket-app
+  annotations:
+    nginx.org/mergeable-ingress-type: master
+    nginx.org/policies: company-network
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [tickets.example.internal]
+      secretName: ticket-app-tls # company CA certificate (NFR-1); from Vault through VSO (T3.11)
+  rules:
+    - host: tickets.example.internal
+---
+# Everything else: the SPA and the API. Evidence uploads go up to 100 MB (FR-T1); the API enforces the real limits.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticket-app-web
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+    nginx.org/client-max-body-size: 101m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: tickets.example.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ticket-app
+                port:
+                  name: http
+---
+# Server-sent events (FR-P3): no buffering, and a read timeout well past the 25 s heartbeat.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticket-app-events
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+    nginx.org/proxy-buffering: "False"
+    nginx.org/proxy-read-timeout: 3600s
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: tickets.example.internal
+      http:
+        paths:
+          - path: /api/events
+            pathType: Exact
+            backend:
+              service:
+                name: ticket-app
+                port:
+                  name: http
+---
+# Guest tracking (T2.14 accepted finding): the API does not limit these, so NGINX does, per client IP.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticket-app-track
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+    nginx.org/limit-req-rate: 30r/m
+    nginx.org/limit-req-burst: "20"
+    # Reject past the burst instead of queueing: without it a client sending one request at a time is only slowed.
+    nginx.org/limit-req-no-delay: "true"
+    nginx.org/limit-req-reject-code: "429"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: tickets.example.internal
+      http:
+        paths:
+          - path: /api/track
+            pathType: Prefix
+            backend:
+              service:
+                name: ticket-app
+                port:
+                  name: http

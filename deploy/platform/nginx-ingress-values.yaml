@@ -1,0 +1,18 @@
+# F5 NGINX Ingress Controller (T3.10, docs/ARCHITECTURE.md), Helm chart oci://ghcr.io/nginx/charts/nginx-ingress 2.7.3
+# (controller 5.6.3). The same values serve the T3.09 host and the local k3d cluster (make cluster-platform).
+controller:
+  ingressClass:
+    name: nginx
+    setAsDefaultIngress: true
+  # No snippets: every setting comes from reviewed annotations and Policy resources.
+  enableSnippets: false
+  service:
+    type: LoadBalancer
+    # Keeps the client's IP on the way in, so the allow list (NFR-4), the /api/track limit and the app's per-IP
+    # limits (FR-A11, NFR-3) see the real address, not the node's.
+    externalTrafficPolicy: Local
+  config:
+    entries:
+      server-tokens: "False"
+      # The default access log format logs no request headers, so X-Tracking-Token never reaches the logs (T3.10).
+      # The token itself is only ever in a header or the URL fragment (T1.15).

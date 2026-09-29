@@ -1,0 +1,25 @@
+# Only the ingress controller and Gotenberg may reach the app pods (T3.10 security review). The app believes
+# X-Forwarded-For from the pod network (TRUSTED_PROXIES), so no other pod may talk to it directly: that would let a
+# workload forge client IPs (FR-A11, NFR-3 limits, audit IPs) and skip the company-network allow list (NFR-4).
+# k3s enforces NetworkPolicy with its built-in controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ticket-app-ingress-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ticket-app
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # The F5 NGINX Ingress Controller's namespace (deploy/platform, Helm release in namespace nginx-ingress).
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-ingress
+        # Gotenberg opens the print pages through the app's Service for PDF export (FR-P4, PRINT_BASE_URL).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gotenberg
+      ports:
+        - port: http

@@ -250,12 +250,13 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
 - [ ] **T3.09** Cluster host — M · deps: none · ops
     - Ubuntu Server 24.04 LTS, k3s with `--disable traefik`, ufw (443 users, 6443 admins).
     - Done when: `kubectl get nodes` shows Ready.
-- [ ] **T3.10** NGINX Ingress — M · deps: T3.09 · be + ops · NFR-1, NFR-4, FR-A11
+- [x] **T3.10** NGINX Ingress — M · deps: T3.09 · be + ops · NFR-1, NFR-4, FR-A11
     - F5 NGINX Ingress Controller, company CA certificate, allow/deny for the company network, 100 MB body limit, SSE settings. Access logs must not include the X-Tracking-Token header.
     - Login limit (FR-A11), guest ticket limit (NFR-3) and audit IPs use `clientIP` (backend/internal/api/tickets.go), which is the TCP peer: behind the ingress that is NGINX for everyone. Go change needed: read `X-Forwarded-For` only from the trusted ingress address. Without it the per-IP limit counts every staff member as one IP, and 20 failures lock everyone out for 15 minutes.
     - Go part done (2026-09-27): `TRUSTED_PROXIES` (comma-separated CIDRs, empty = trust nobody) makes `s.clientIP` take the right-most X-Forwarded-For entry that is not a trusted proxy, only when the TCP peer is trusted; `TestClientIP_FRA11`, `TestLoad_TrustedProxies_FRA11`; security review found no code defect. Ops still to do: set `TRUSTED_PROXIES` to the ingress pod CIDR only (never 0.0.0.0/0), and make NGINX append the socket peer (`$proxy_add_x_forwarded_for`), never pass a client's header through unchanged, or the right-most entry becomes attacker-controlled. Add `TRUSTED_PROXIES=` to .env.example by hand (agents cannot edit `.env*`).
     - Done when: HTTPS works, an outside IP is refused, and through the ingress 20 failed logins from client A leave client B able to sign in.
     - Add an NGINX request limit on `/api/track/*` (T2.14 accepted: the API itself does not limit it).
+    - Status: done on the local k3s cluster (2026-09-28): the F5 NGINX Ingress Controller, a mergeable Ingress with the company-network allow Policy, a NetworkPolicy that lets only the ingress and Gotenberg reach the app, and `make cluster-check-ingress` passing all 12 checks (HTTPS, outside IP refused, client A limited while client B signs in, SSE, 20 MB upload, /api/track limit, no token in logs, PDF export). On the T3.09 host: company CA certificate, company networks and host name replace the placeholders. See [note](notes/T3.10.md).
 - [ ] **T3.11** Vault — L · deps: T3.09 · ops · NFR-7
     - Helm install with Raft, unseal ceremony (3 of 5 key holders), Kubernetes auth, audit device, VSO; app secrets for staging and prod.
     - Done when: app pods read secrets from VSO-created Secrets and nothing secret is in Git.

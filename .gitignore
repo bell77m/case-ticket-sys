@@ -15,6 +15,7 @@ backend/uploads/
 .env.*
 !.env.example
 deploy/overlays/local/secrets.env
+deploy/overlays/local/tls/
 
 # Tool state
 .remember/

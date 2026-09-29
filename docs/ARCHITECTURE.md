@@ -61,7 +61,7 @@ flowchart LR
 | PostgreSQL | StatefulSet + PV; CloudNativePG later if failover needed |
 | Migrations | goose Job (image from `deploy/migrate.Dockerfile`) as Argo CD Sync hook in wave 1: after PostgreSQL (wave 0), before the app Deployment (wave 2) |
 | Uploads | PV, start 200 GB; NFS (ReadWriteMany) when multi-node |
-| NGINX | F5 NGINX Ingress Controller (community ingress-nginx retired March 2026 — verify); `client_max_body_size 100m`; allow/deny company network; `proxy_buffering off` + 1 h read timeout on `/api/events` |
+| NGINX | F5 NGINX Ingress Controller, Helm chart 2.7.3 (controller 5.6.3), values in `deploy/platform/nginx-ingress-values.yaml` (snippets off, `externalTrafficPolicy: Local` so client IPs survive). `deploy/base/ingress.yaml`: a mergeable Ingress; the master holds host, TLS (`ticket-app-tls`) and the `company-network` allow Policy for every path; minions: `/` 101m bodies, `/api/events` no buffering + 1 h read timeout, `/api/track` 30 r/min per client IP, burst 20, 429 past it. The app trusts X-Forwarded-For only from the pod network (`TRUSTED_PROXIES=10.42.0.0/16`). The default access log carries no request headers, so no tracking token |
 | Redis | 1 replica, password from Vault, `appendonly yes` on small PV |
 | Gotenberg | 1 replica, ClusterIP only, ~512 MB memory; the app sets `GOTENBERG_URL` to its service and `PRINT_BASE_URL` to the app's own ClusterIP service URL, which Gotenberg's Chromium must be able to reach |
 | Vault | hashicorp/vault Helm chart, Raft storage, 1 pod (3 for HA); Kubernetes auth; file audit device; Shamir unseal 3 of 5 |

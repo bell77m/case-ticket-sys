@@ -67,9 +67,26 @@ deploy-lint:
 # Local test cluster (k3s in Docker via k3d; docs/notes/2026-09-28-local-cluster.md). Every kubectl call names the
 # k3d context, so these targets never touch another cluster.
 KCTX := --context k3d-ticket-local
-.PHONY: cluster-up cluster-images cluster-deploy cluster-down
+.PHONY: cluster-up cluster-platform cluster-images cluster-deploy cluster-down
 cluster-up:
 	k3d cluster create --config deploy/local/k3d.yaml
+	$(MAKE) cluster-platform
+
+# Platform pieces, with the same values files the T3.09 host uses (deploy/platform).
+NIC_CHART_VERSION := 2.7.3
+cluster-platform:
+	helm upgrade --install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version $(NIC_CHART_VERSION) \
+		--kube-context k3d-ticket-local -n nginx-ingress --create-namespace -f deploy/platform/nginx-ingress-values.yaml --wait
+
+# A throwaway local CA and a certificate for tickets.localtest.me (gitignored); curl --cacert tls/ca.crt trusts it.
+deploy/overlays/local/tls/tls.crt:
+	mkdir -p $(@D)
+	MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=ticket-local test CA" \
+		-keyout $(@D)/ca.key -out $(@D)/ca.crt
+	MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes -subj "/CN=tickets.localtest.me" -keyout $(@D)/tls.key -out $(@D)/tls.csr
+	printf 'subjectAltName=DNS:tickets.localtest.me\n' > $(@D)/san.ext
+	openssl x509 -req -in $(@D)/tls.csr -CA $(@D)/ca.crt -CAkey $(@D)/ca.key -CAcreateserial -days 365 \
+		-extfile $(@D)/san.ext -out $@
 
 # Third-party images come from the host's Docker (pulled once there), which is far faster than pulling in-cluster.
 LOCAL_THIRD_PARTY := postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8
@@ -85,7 +102,7 @@ deploy/overlays/local/secrets.env:
 
 # Plain kubectl has no Argo CD sync waves (T3.13), so the order is done by hand: data services ready first, then the
 # migration Job (an Argo CD hook; deleted and created again so each deploy runs it), then the app.
-cluster-deploy: deploy/overlays/local/secrets.env cluster-images
+cluster-deploy: deploy/overlays/local/secrets.env deploy/overlays/local/tls/tls.crt cluster-images
 	kubectl $(KCTX) apply -k deploy/overlays/local
 	kubectl $(KCTX) -n ticket-local rollout status statefulset/postgres --timeout=5m
 	kubectl $(KCTX) -n ticket-local rollout status statefulset/redis --timeout=5m
@@ -94,6 +111,15 @@ cluster-deploy: deploy/overlays/local/secrets.env cluster-images
 	kubectl $(KCTX) -n ticket-local wait --for=condition=complete job/ticket-migrate --timeout=5m
 	kubectl $(KCTX) -n ticket-local rollout restart deploy/ticket-app
 	kubectl $(KCTX) -n ticket-local rollout status deploy/ticket-app --timeout=5m
+
+.PHONY: cluster-seed cluster-check-ingress
+# Dev sample locations and the dev staff (root, agent, viewer / dev-password) in the cluster's database.
+cluster-seed:
+	kubectl $(KCTX) -n ticket-local exec -i postgres-0 -- psql -U ticket -d ticket -v ON_ERROR_STOP=1 -q < backend/seed/dev.sql
+
+# T3.10 checks through the ingress (HTTPS, allow list, per-client login limit, SSE, uploads, /api/track limit, logs).
+cluster-check-ingress:
+	bash deploy/local/ingress-check.sh
 
 cluster-down:
 	k3d cluster delete ticket-local

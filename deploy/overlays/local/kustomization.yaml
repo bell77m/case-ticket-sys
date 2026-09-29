@@ -24,8 +24,31 @@ secretGenerator:
   # Stands in for the VSO-created Secret (T3.11) with the keys listed in deploy/base/kustomization.yaml.
   - name: ticket-app-secrets
     envs: [secrets.env]
+  # A certificate from a throwaway local CA (make writes both, gitignored) instead of the company CA (NFR-1).
+  - name: ticket-app-tls
+    type: kubernetes.io/tls
+    files: [tls/tls.crt, tls/tls.key]
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge
     literals:
-      - BASE_URL=http://localhost:8088
+      # tickets.localtest.me resolves to 127.0.0.1; k3d maps host port 8443 to the ingress (deploy/local/k3d.yaml).
+      - BASE_URL=https://tickets.localtest.me:8443
+patches:
+  # Locally the "company network" is Docker's address pool (the host and test containers). In-cluster pods
+  # (10.42.0.0/16) are outside it, which is how the refused-IP check is done (T3.10).
+  - target: { kind: Policy, name: company-network }
+    patch: |-
+      - op: replace
+        path: /spec/accessControl/allow
+        value: [172.16.0.0/12]
+  - target: { kind: Ingress }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tickets.localtest.me
+  - target: { kind: Ingress, name: ticket-app }
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: tickets.localtest.me

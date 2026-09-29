@@ -17,4 +17,17 @@ configMapGenerator:
   - name: ticket-app-config
     behavior: merge
     literals:
-      - BASE_URL=https://tickets-staging.example.internal # placeholder until T3.10 sets the host
+      - BASE_URL=https://tickets-staging.example.internal # placeholder until the real host is known (T3.09)
+patches:
+  # The Ingress (T3.10) answers on the same host. The company networks stay the base placeholder (TEST-NET, which
+  # allows nobody) until the real ranges are known: patch Policy company-network like deploy/overlays/local does.
+  - target: { kind: Ingress }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tickets-staging.example.internal
+  - target: { kind: Ingress, name: ticket-app }
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: tickets-staging.example.internal
