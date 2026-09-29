@@ -63,3 +63,37 @@ deploy-lint:
 		printf '%s\n' "$$m" | MSYS_NO_PATHCONV=1 docker run --rm -i -v "$(CURDIR)/deploy/trivy-data.yaml:/data/trivy-data.yaml:ro" --entrypoint sh \
 			aquasec/trivy:0.74.0 -c 'cat > /tmp/$$0.yaml && trivy config --quiet --exit-code 1 --config-data /data /tmp/$$0.yaml' $$o || exit 1; \
 	done
+
+# Local test cluster (k3s in Docker via k3d; docs/notes/2026-09-28-local-cluster.md). Every kubectl call names the
+# k3d context, so these targets never touch another cluster.
+KCTX := --context k3d-ticket-local
+.PHONY: cluster-up cluster-images cluster-deploy cluster-down
+cluster-up:
+	k3d cluster create --config deploy/local/k3d.yaml
+
+# Third-party images come from the host's Docker (pulled once there), which is far faster than pulling in-cluster.
+LOCAL_THIRD_PARTY := postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8
+cluster-images:
+	docker build -t ticket-app:local .
+	docker build -f deploy/migrate.Dockerfile -t ticket-migrate:local .
+	for i in $(LOCAL_THIRD_PARTY); do docker image inspect $$i >/dev/null 2>&1 || docker pull $$i || exit 1; done
+	k3d image import -c ticket-local ticket-app:local ticket-migrate:local $(LOCAL_THIRD_PARTY)
+
+# Random passwords, written once; the file is gitignored and read by the local overlay's secretGenerator.
+deploy/overlays/local/secrets.env:
+	node -e 'const r=()=>require("crypto").randomBytes(16).toString("hex");const o=r(),a=r(),d=r();process.stdout.write(["POSTGRES_PASSWORD="+o,"TICKET_APP_DB_PASSWORD="+a,"REDIS_PASSWORD="+d,"DATABASE_URL=postgres://ticket_app:"+a+"@postgres:5432/ticket?sslmode=disable","MIGRATE_DATABASE_URL=postgres://ticket:"+o+"@postgres:5432/ticket?sslmode=disable","REDIS_URL=redis://:"+d+"@redis:6379/0",""].join("\n"))' > $@
+
+# Plain kubectl has no Argo CD sync waves (T3.13), so the order is done by hand: data services ready first, then the
+# migration Job (an Argo CD hook; deleted and created again so each deploy runs it), then the app.
+cluster-deploy: deploy/overlays/local/secrets.env cluster-images
+	kubectl $(KCTX) apply -k deploy/overlays/local
+	kubectl $(KCTX) -n ticket-local rollout status statefulset/postgres --timeout=5m
+	kubectl $(KCTX) -n ticket-local rollout status statefulset/redis --timeout=5m
+	kubectl $(KCTX) -n ticket-local delete job ticket-migrate --ignore-not-found
+	kubectl $(KCTX) apply -k deploy/overlays/local
+	kubectl $(KCTX) -n ticket-local wait --for=condition=complete job/ticket-migrate --timeout=5m
+	kubectl $(KCTX) -n ticket-local rollout restart deploy/ticket-app
+	kubectl $(KCTX) -n ticket-local rollout status deploy/ticket-app --timeout=5m
+
+cluster-down:
+	k3d cluster delete ticket-local

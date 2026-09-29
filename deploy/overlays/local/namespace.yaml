@@ -1,0 +1,5 @@
+# Staging and prod get their namespaces from Argo CD (T3.14); plain `kubectl apply -k` needs this one.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticket-local

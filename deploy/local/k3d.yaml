@@ -1,0 +1,19 @@
+# Local test cluster (make cluster-up): k3s in Docker via k3d, the same distribution the T3.09 host runs.
+# For proving the manifests and the platform pieces (T3.10-T3.16) on a laptop; never a place for real data.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: ticket-local
+servers: 1
+ports:
+  # The ingress controller (T3.10) will listen here; nothing else is exposed to the host.
+  - port: 127.0.0.1:8088:80
+    nodeFilters: [loadbalancer]
+  - port: 127.0.0.1:8443:443
+    nodeFilters: [loadbalancer]
+options:
+  k3s:
+    extraArgs:
+      # As on the T3.09 host: NGINX Ingress replaces the bundled Traefik (docs/ARCHITECTURE.md).
+      - arg: --disable=traefik
+        nodeFilters: [server:*]
