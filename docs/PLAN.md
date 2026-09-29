@@ -276,9 +276,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Build, Syft SBOM, Trivy image scan, Cosign sign, push to Harbor, update GitOps tag, ZAP baseline on staging; CI secrets from Vault JWT auth.
     - Done when: a merge to main reaches staging with no manual step.
     - Status: interim pipeline built (2026-09-28): .github/workflows/cd.yml builds, scans, pushes to GHCR, signs keyless and commits the staging digests after each green CI run on main. Still to do once the platform exists: Harbor instead of GHCR (T3.12), Vault JWT instead of the GitHub token (T3.11), ZAP baseline on staging. Argo CD (T3.14) picks up the digest commit. See [note](notes/2026-09-28-ci-cd.md).
-- [ ] **T3.16** Backups and restore test — M · deps: T3.13 · ops · NFR-8
+- [x] **T3.16** Backups and restore test — M · deps: T3.13 · ops · NFR-8
     - Nightly CronJob: pg_dump and uploads to NFS; documented restore steps.
     - Done when: a restore into a scratch namespace brings back tickets and evidence.
+    - Status: done. The nightly CronJob `ticket-backup` writes a checksummed pg_dump and uploads tar (14 days kept); on the local cluster `make cluster-restore-test` restores into `ticket-restore` with equal counts, files and checksums, and docs/RESTORE.md's in-place restore was drilled. Still to do on the T3.09 host: the NFS share, locked to the node. See [note](notes/T3.16.md).
 - [ ] **T3.17** End-to-end smoke tests — M · deps: T3.04, T3.15 · fe
     - Playwright: guest submits with photo, staff logs in, assigns, resolves, guest confirms, dashboard updates; run in CI against staging.
     - Done when: suite passes in all 4 languages.

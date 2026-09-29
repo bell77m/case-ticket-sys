@@ -142,7 +142,7 @@ cluster-deploy: cluster-vault cluster-images
 	kubectl $(KCTX) -n ticket-local rollout restart deploy/ticket-app
 	kubectl $(KCTX) -n ticket-local rollout status deploy/ticket-app --timeout=5m
 
-.PHONY: cluster-seed cluster-check-ingress
+.PHONY: cluster-seed cluster-check-ingress cluster-restore-test
 # Dev sample locations and the dev staff (root, agent, viewer / dev-password) in the cluster's database.
 cluster-seed:
 	kubectl $(KCTX) -n ticket-local exec -i postgres-0 -- psql -U ticket -d ticket -v ON_ERROR_STOP=1 -q < backend/seed/dev.sql
@@ -150,6 +150,10 @@ cluster-seed:
 # T3.10 checks through the ingress (HTTPS, allow list, per-client login limit, SSE, uploads, /api/track limit, logs).
 cluster-check-ingress:
 	bash deploy/local/ingress-check.sh
+
+# T3.16: back up now, restore into the scratch namespace ticket-restore, compare tickets and evidence (docs/RESTORE.md).
+cluster-restore-test:
+	bash deploy/local/restore-test.sh
 
 cluster-down:
 	k3d cluster delete ticket-local

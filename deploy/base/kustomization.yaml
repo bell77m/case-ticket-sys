@@ -20,6 +20,7 @@ resources:
   - ingress.yaml
   - networkpolicy.yaml
   - vault.yaml
+  - backup.yaml
 images:
   # Third-party images through Harbor's Docker Hub proxy cache: images come only from Harbor (.claude/rules/deploy.md).
   # Placeholder host and project until T3.12; deploy/trivy-data.yaml names the same host.

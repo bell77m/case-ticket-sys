@@ -1,0 +1,63 @@
+# In-place restore helper (T3.16, NFR-8); steps in docs/RESTORE.md. Not part of any overlay: apply it by hand in the
+# namespace being restored, with the image the backup CronJob uses (the runbook's sed sets it), then delete it.
+# It mounts the backup volume read-only and the uploads volume read-write, and connects to PostgreSQL as the owner.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ticket-restore
+  labels:
+    app.kubernetes.io/name: ticket-restore
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    # ticket-app's user, so restored upload files keep the owner the app expects.
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: restore
+      image: postgres:16-alpine
+      command: [sleep, "7200"] # stops after two hours if forgotten
+      env:
+        - name: PGHOST
+          value: postgres
+        - name: PGUSER
+          value: ticket
+        - name: PGDATABASE
+          value: ticket
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ticket-app-secrets
+              key: POSTGRES_PASSWORD
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: uploads
+          mountPath: /data/uploads
+        - name: backups
+          mountPath: /backups
+          readOnly: true
+  volumes:
+    - name: uploads
+      persistentVolumeClaim:
+        claimName: ticket-app-uploads
+    - name: backups
+      persistentVolumeClaim:
+        claimName: ticket-backups
+        readOnly: true
