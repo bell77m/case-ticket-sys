@@ -87,7 +87,11 @@ test('filters by action and by ticket, keep them in the URL, and page through th
 	await openAsLead(page);
 	expect((await page.request.patch(`/api/staff/tickets/${id}`, { data: { priority: 'high' } })).ok()).toBe(true);
 
-	// Pages: newest first, 50 per page. The dev DB holds far more than 50 rows.
+	// Pages: newest first, 50 per page. A fresh database (CI) can hold fewer rows, so open guest tickets until the log
+	// has a second page (each writes one ticket.created row); the long-lived dev DB needs none.
+	const { total } = await (await page.request.get('/api/staff/activity')).json();
+	for (let i = total; i <= 50; i++) await guestTicket(request, `Paging filler ${i}: the badge reader beeps twice.`);
+	if (total <= 50) await page.reload();
 	await expect(page.getByText(/^Page 1 of \d+$/)).toBeVisible();
 	await page.getByRole('button', { name: 'Next' }).click();
 	await expect(page).toHaveURL(/page=2/);
