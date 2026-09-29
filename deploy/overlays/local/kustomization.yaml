@@ -1,6 +1,7 @@
 # Local test cluster only (make cluster-deploy), never staging or prod: the base manifests with images built from
-# this checkout, third-party images straight from Docker Hub (no Harbor locally), and the Secret generated from a
-# gitignored secrets.env with random passwords (make writes it; no secret value is in Git).
+# this checkout and third-party images straight from Docker Hub (no Harbor locally). Secrets come from the local
+# Vault through VSO like everywhere else (T3.11): deploy/local/vault-setup.sh writes the random values from the
+# gitignored secrets.env and tls/ into Vault, so no secret value is in Git or in a manifest.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: ticket-local
@@ -20,14 +21,6 @@ images:
     newName: redis
   - name: harbor.example.internal/dockerhub/gotenberg/gotenberg
     newName: gotenberg/gotenberg
-secretGenerator:
-  # Stands in for the VSO-created Secret (T3.11) with the keys listed in deploy/base/kustomization.yaml.
-  - name: ticket-app-secrets
-    envs: [secrets.env]
-  # A certificate from a throwaway local CA (make writes both, gitignored) instead of the company CA (NFR-1).
-  - name: ticket-app-tls
-    type: kubernetes.io/tls
-    files: [tls/tls.crt, tls/tls.key]
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge
@@ -52,3 +45,19 @@ patches:
       - op: replace
         path: /spec/tls/0/hosts/0
         value: tickets.localtest.me
+  # Vault role and paths for this environment (deploy/local/vault-setup.sh creates them).
+  - target: { kind: VaultAuth, name: ticket-app }
+    patch: |-
+      - op: replace
+        path: /spec/kubernetes/role
+        value: ticket-local
+  - target: { kind: VaultStaticSecret, name: ticket-app-secrets }
+    patch: |-
+      - op: replace
+        path: /spec/path
+        value: ticket/local/app
+  - target: { kind: VaultStaticSecret, name: ticket-app-tls }
+    patch: |-
+      - op: replace
+        path: /spec/path
+        value: ticket/local/tls

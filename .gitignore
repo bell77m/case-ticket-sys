@@ -16,6 +16,7 @@ backend/uploads/
 !.env.example
 deploy/overlays/local/secrets.env
 deploy/overlays/local/tls/
+deploy/local/vault-init.json
 
 # Tool state
 .remember/

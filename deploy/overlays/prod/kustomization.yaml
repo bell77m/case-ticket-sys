@@ -34,3 +34,19 @@ patches:
       - op: replace
         path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
         value: 50Gi
+  # Vault role and paths for this environment (T3.11; the Vault side is set up as in docs/notes/T3.11.md).
+  - target: { kind: VaultAuth, name: ticket-app }
+    patch: |-
+      - op: replace
+        path: /spec/kubernetes/role
+        value: ticket-prod
+  - target: { kind: VaultStaticSecret, name: ticket-app-secrets }
+    patch: |-
+      - op: replace
+        path: /spec/path
+        value: ticket/prod/app
+  - target: { kind: VaultStaticSecret, name: ticket-app-tls }
+    patch: |-
+      - op: replace
+        path: /spec/path
+        value: ticket/prod/tls

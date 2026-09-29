@@ -257,9 +257,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Done when: HTTPS works, an outside IP is refused, and through the ingress 20 failed logins from client A leave client B able to sign in.
     - Add an NGINX request limit on `/api/track/*` (T2.14 accepted: the API itself does not limit it).
     - Status: done on the local k3s cluster (2026-09-28): the F5 NGINX Ingress Controller, a mergeable Ingress with the company-network allow Policy, a NetworkPolicy that lets only the ingress and Gotenberg reach the app, and `make cluster-check-ingress` passing all 12 checks (HTTPS, outside IP refused, client A limited while client B signs in, SSE, 20 MB upload, /api/track limit, no token in logs, PDF export). On the T3.09 host: company CA certificate, company networks and host name replace the placeholders. See [note](notes/T3.10.md).
-- [ ] **T3.11** Vault — L · deps: T3.09 · ops · NFR-7
+- [x] **T3.11** Vault — L · deps: T3.09 · ops · NFR-7
     - Helm install with Raft, unseal ceremony (3 of 5 key holders), Kubernetes auth, audit device, VSO; app secrets for staging and prod.
     - Done when: app pods read secrets from VSO-created Secrets and nothing secret is in Git.
+    - Status: done on the local k3s cluster (2026-09-28): Vault 2.0.4 (Raft, TLS, file audit device, 5 key shares / 3 to unseal) and VSO sync `ticket-app-secrets` and `ticket-app-tls` from `secret/ticket/<env>/*` with a read-only role per environment; the app runs on them, a changed value restarts the app and Redis, and Gitleaks finds nothing in Git. On the T3.09 host: the unseal ceremony with five key holders, the company-CA certificate for Vault, and the staging and prod values. See [note](notes/T3.11.md).
 - [ ] **T3.12** Harbor, signing, Kyverno — M · deps: T3.11 · ops · NFR-10
     - Harbor project, Cosign key in Vault, Kyverno policies (signed Harbor images only, no root, limits required).
     - Done when: an unsigned image is refused by the cluster.

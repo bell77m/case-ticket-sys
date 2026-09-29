@@ -67,16 +67,45 @@ deploy-lint:
 # Local test cluster (k3s in Docker via k3d; docs/notes/2026-09-28-local-cluster.md). Every kubectl call names the
 # k3d context, so these targets never touch another cluster.
 KCTX := --context k3d-ticket-local
-.PHONY: cluster-up cluster-platform cluster-images cluster-deploy cluster-down
+.PHONY: cluster-up cluster-platform cluster-vault cluster-images cluster-deploy cluster-down
 cluster-up:
 	k3d cluster create --config deploy/local/k3d.yaml
 	$(MAKE) cluster-platform
 
-# Platform pieces, with the same values files the T3.09 host uses (deploy/platform).
+# Platform pieces, with the same values files the T3.09 host uses (deploy/platform). Vault is installed without
+# --wait: its pod is not Ready until cluster-vault initialises and unseals it.
 NIC_CHART_VERSION := 2.7.3
-cluster-platform:
+VAULT_CHART_VERSION := 0.34.1
+VSO_CHART_VERSION := 1.6.0
+HELM_LOCAL := --kube-context k3d-ticket-local --create-namespace
+cluster-platform: cluster-vault-tls
 	helm upgrade --install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version $(NIC_CHART_VERSION) \
-		--kube-context k3d-ticket-local -n nginx-ingress --create-namespace -f deploy/platform/nginx-ingress-values.yaml --wait
+		$(HELM_LOCAL) -n nginx-ingress -f deploy/platform/nginx-ingress-values.yaml --wait
+	helm repo add hashicorp https://helm.releases.hashicorp.com --force-update
+	helm upgrade --install vault hashicorp/vault --version $(VAULT_CHART_VERSION) \
+		$(HELM_LOCAL) -n vault -f deploy/platform/vault-values.yaml
+	helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator --version $(VSO_CHART_VERSION) \
+		$(HELM_LOCAL) -n vault-secrets-operator-system -f deploy/platform/vso-values.yaml --wait
+
+# Initialise or unseal Vault and load the local secrets into it (T3.11).
+cluster-vault: deploy/overlays/local/secrets.env deploy/overlays/local/tls/tls.crt
+	bash deploy/local/vault-setup.sh
+
+# Vault's own TLS certificate from the local CA (on the T3.09 host: the company CA), as Secrets vault-tls (namespace
+# vault) and vault-ca (VSO's namespace), created before Helm installs them (deploy/platform/vault-values.yaml).
+.PHONY: cluster-vault-tls
+cluster-vault-tls: deploy/overlays/local/tls/vault.crt
+	for n in vault vault-secrets-operator-system; do kubectl $(KCTX) create namespace $$n --dry-run=client -o yaml | kubectl $(KCTX) apply -f - >/dev/null; done
+	cd deploy/overlays/local/tls && kubectl $(KCTX) -n vault create secret generic vault-tls --from-file=tls.crt=vault.crt \
+		--from-file=tls.key=vault.key --from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply -f -
+	cd deploy/overlays/local/tls && kubectl $(KCTX) -n vault-secrets-operator-system create secret generic vault-ca \
+		--from-file=ca.crt --dry-run=client -o yaml | kubectl $(KCTX) apply -f -
+
+deploy/overlays/local/tls/vault.crt: deploy/overlays/local/tls/tls.crt
+	MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes -subj "/CN=vault" -keyout $(@D)/vault.key -out $(@D)/vault.csr
+	printf 'subjectAltName=DNS:vault,DNS:vault.vault.svc,DNS:vault.vault.svc.cluster.local,DNS:vault-0.vault-internal,IP:127.0.0.1\n' > $(@D)/vault-san.ext
+	openssl x509 -req -in $(@D)/vault.csr -CA $(@D)/ca.crt -CAkey $(@D)/ca.key -CAcreateserial -days 365 \
+		-extfile $(@D)/vault-san.ext -out $@
 
 # A throwaway local CA and a certificate for tickets.localtest.me (gitignored); curl --cacert tls/ca.crt trusts it.
 deploy/overlays/local/tls/tls.crt:
@@ -102,7 +131,8 @@ deploy/overlays/local/secrets.env:
 
 # Plain kubectl has no Argo CD sync waves (T3.13), so the order is done by hand: data services ready first, then the
 # migration Job (an Argo CD hook; deleted and created again so each deploy runs it), then the app.
-cluster-deploy: deploy/overlays/local/secrets.env deploy/overlays/local/tls/tls.crt cluster-images
+cluster-deploy: cluster-vault cluster-images
+	kubectl $(KCTX) -n ticket-local delete job ticket-migrate --ignore-not-found
 	kubectl $(KCTX) apply -k deploy/overlays/local
 	kubectl $(KCTX) -n ticket-local rollout status statefulset/postgres --timeout=5m
 	kubectl $(KCTX) -n ticket-local rollout status statefulset/redis --timeout=5m

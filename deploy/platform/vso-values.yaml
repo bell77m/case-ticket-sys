@@ -1,0 +1,17 @@
+# Vault Secrets Operator (T3.11), Helm chart hashicorp/vault-secrets-operator 1.6.0. It turns the VaultStaticSecret
+# objects in deploy/base/vault.yaml into the Kubernetes Secrets the app reads, and restarts the app when they change.
+defaultVaultConnection:
+  enabled: true
+  # In-cluster Vault from vault-values.yaml, over TLS. Secret "vault-ca" (key ca.crt) in this chart's namespace holds
+  # the CA that issued Vault's certificate; it is created with vault-tls (see vault-values.yaml).
+  address: https://vault.vault.svc.cluster.local:8200
+  caCertSecret: vault-ca
+controller:
+  manager:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

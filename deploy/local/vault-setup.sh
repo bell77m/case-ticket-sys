@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# T3.11 on the local k3d cluster (make cluster-vault): initialise and unseal Vault (5 key shares, 3 needed), turn on
+# the file audit device, enable KV v2 and Kubernetes auth, write the ticket-local read-only policy and role, then load
+# the local secrets from the gitignored deploy/overlays/local/secrets.env and tls/. Safe to run again: every step
+# checks first, so it also unseals Vault after a restart.
+#
+# LOCAL ONLY: the unseal keys and the root token land in the gitignored deploy/local/vault-init.json. On the T3.09
+# host the five keys go to five people and the root token is revoked after setup (docs/notes/T3.11.md). Keys and
+# tokens travel on stdin, never as command arguments (they would show in process lists and the API server's audit log).
+set -euo pipefail
+export MSYS_NO_PATHCONV=1 # Git Bash: pass paths such as /vault/audit/audit.log into the pod as written
+umask 077
+
+ctx=k3d-ticket-local
+env=local
+ns=ticket-local
+init=deploy/local/vault-init.json
+secrets=deploy/overlays/local/secrets.env
+tls=deploy/overlays/local/tls
+
+k() { kubectl --context "$ctx" "$@"; }
+# vault without a token (status, init, unseal); stdin passes through.
+v0() { k -n vault exec -i vault-0 -- vault "$@"; }
+# vault with the token as the first line of stdin, then the command's own input (if any) after it.
+v() { { printf '%s\n' "$VAULT_TOKEN"; [ -t 0 ] || cat; } | k -n vault exec -i vault-0 -- sh -c 'read -r VAULT_TOKEN; export VAULT_TOKEN; exec vault "$@"' vault "$@"; }
+field() { node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8"));let x=j;for(const k of process.argv[1].split("."))x=x[k];process.stdout.write(String(x))' "$1"; }
+
+# Vault's pod runs but is not Ready while sealed, so wait for Running, not Ready.
+k -n vault wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 --timeout=5m >/dev/null
+
+# vault status: exit 0 = unsealed, 2 = sealed, anything else = could not ask. Never guess on an error.
+rc=0
+status=$(v0 status -format=json </dev/null) || rc=$?
+[ "$rc" = 0 ] || [ "$rc" = 2 ] || { echo "vault status failed (exit $rc); not touching Vault" >&2; exit 1; }
+if [ "$(echo "$status" | field initialized)" != true ]; then
+	[ ! -e "$init" ] || { echo "$init exists but Vault is not initialised; refusing to overwrite the keys" >&2; exit 1; }
+	echo "initialising Vault (5 key shares, threshold 3)"
+	v0 operator init -key-shares=5 -key-threshold=3 -format=json </dev/null >"$init.tmp"
+	mv "$init.tmp" "$init"
+	status=$(v0 status -format=json </dev/null) || true
+fi
+if [ "$(echo "$status" | field sealed)" = true ]; then
+	echo "unsealing Vault with 3 of 5 keys"
+	for i in 0 1 2; do
+		printf '{"key":"%s"}' "$(field "unseal_keys_b64.$i" <"$init")" | v0 write -format=json sys/unseal - >/dev/null
+	done
+fi
+VAULT_TOKEN=$(field root_token <"$init")
+
+# Audit first, so everything after it is recorded (hashed) from the very first run.
+v audit list -format=json </dev/null 2>/dev/null | grep -q '"file/"' ||
+	v audit enable file file_path=/vault/audit/audit.log </dev/null
+v secrets list -format=json </dev/null | grep -q '"secret/"' || v secrets enable -path=secret kv-v2 </dev/null
+v auth list -format=json </dev/null | grep -q '"kubernetes/"' || v auth enable kubernetes </dev/null
+# In the cluster, Vault checks service-account tokens with its own ServiceAccount (the chart's auth-delegator binding).
+v write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc </dev/null >/dev/null
+
+# Read-only access to this environment's entries, for the ServiceAccount VSO uses in this namespace (vault.yaml).
+printf 'path "secret/data/ticket/%s/*" {\n  capabilities = ["read"]\n}\n' "$env" | v policy write "ticket-$env" - >/dev/null
+v write "auth/kubernetes/role/ticket-$env" bound_service_account_names=ticket-app-vault \
+	bound_service_account_namespaces="$ns" policies="ticket-$env" audience=vault ttl=1h </dev/null >/dev/null
+
+# The values: app secrets from secrets.env, the certificate from tls/ (written as KV v2 JSON bodies on stdin).
+node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").split(/\r?\n/).filter(Boolean);const d={};for(const x of l){const i=x.indexOf("=");d[x.slice(0,i)]=x.slice(i+1)}process.stdout.write(JSON.stringify({data:d}))' "$secrets" |
+	v write "secret/data/ticket/$env/app" - >/dev/null
+node -e 'const f=require("fs");process.stdout.write(JSON.stringify({data:{"tls.crt":f.readFileSync(process.argv[1],"utf8"),"tls.key":f.readFileSync(process.argv[2],"utf8")}}))' "$tls/tls.crt" "$tls/tls.key" |
+	v write "secret/data/ticket/$env/tls" - >/dev/null
+
+echo "Vault ready: sealed=$(v0 status -format=json </dev/null | field sealed), secrets at secret/ticket/$env/{app,tls}"

@@ -1,7 +1,7 @@
-# Base for staging and prod (overlays set namespace, image tags, BASE_URL, storage sizes, the Ingress host and the
-# company networks). Not here: the Vault/VSO objects (T3.11).
+# Base for staging and prod (overlays set namespace, image tags, BASE_URL, storage sizes, the Ingress host, the
+# company networks and the Vault role and paths).
 #
-# Secrets: every pod reads the Secret "ticket-app-secrets", which VSO creates in each namespace from Vault.
+# Secrets: every pod reads the Secret "ticket-app-secrets", which VSO creates in each namespace from Vault (vault.yaml).
 # Keys it must hold (values never in Git):
 #   DATABASE_URL            postgres://ticket_app:<pw>@postgres:5432/ticket?sslmode=disable   (app)
 #   MIGRATE_DATABASE_URL    postgres://ticket:<pw>@postgres:5432/ticket?sslmode=disable       (migration Job only)
@@ -19,6 +19,7 @@ resources:
   - gotenberg.yaml
   - ingress.yaml
   - networkpolicy.yaml
+  - vault.yaml
 images:
   # Third-party images through Harbor's Docker Hub proxy cache: images come only from Harbor (.claude/rules/deploy.md).
   # Placeholder host and project until T3.12; deploy/trivy-data.yaml names the same host.

@@ -1,0 +1,61 @@
+# Secrets from Vault through the Vault Secrets Operator (T3.11, NFR-7; deploy/platform/vso-values.yaml). VSO signs in
+# to Vault as ServiceAccount ticket-app-vault (Kubernetes auth), reads two KV v2 entries and writes them as the
+# Kubernetes Secrets every pod uses. No secret value is in Git. Overlays set the Vault role and paths per environment
+# (placeholders here); the Vault side (policy, role, values) is set up as in docs/notes/T3.11.md.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ticket-app-vault
+automountServiceAccountToken: false # used only by VSO to request a token for Vault, never mounted in a pod
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: ticket-app
+spec:
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: ticket-ENV # overlay: ticket-staging, ticket-prod, ticket-local
+    serviceAccount: ticket-app-vault
+    audiences: [vault]
+---
+# DATABASE_URL, MIGRATE_DATABASE_URL, REDIS_URL, POSTGRES_PASSWORD, TICKET_APP_DB_PASSWORD, REDIS_PASSWORD
+# (the keys listed in kustomization.yaml).
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: ticket-app-secrets
+spec:
+  vaultAuthRef: ticket-app
+  type: kv-v2
+  mount: secret
+  path: ticket/ENV/app # overlay: ticket/staging/app, ...
+  refreshAfter: 60s
+  destination:
+    name: ticket-app-secrets
+    create: true
+  # A changed value reaches the pods that read it as environment variables by a rolling restart: the app, and Redis
+  # (REDIS_PASSWORD). PostgreSQL reads its passwords only when its volume is first initialised, so a restart would
+  # not apply a new one; rotating a database password is a manual step (docs/notes/T3.11.md).
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: ticket-app
+    - kind: StatefulSet
+      name: redis
+---
+# The HTTPS certificate for the Ingress (NFR-1): keys tls.crt and tls.key, issued by the company CA.
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: ticket-app-tls
+spec:
+  vaultAuthRef: ticket-app
+  type: kv-v2
+  mount: secret
+  path: ticket/ENV/tls # overlay: ticket/staging/tls, ...
+  refreshAfter: 60s
+  destination:
+    name: ticket-app-tls
+    create: true
+    type: kubernetes.io/tls
