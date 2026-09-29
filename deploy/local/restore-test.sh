@@ -19,7 +19,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Same security settings as the CronJob (deploy/base/backup.yaml); the pods only sleep until the test is done.
+# Same image and security settings as the CronJob (deploy/base/backup.yaml), so the pods pass the same cluster
+# policies (T3.12: Harbor images only, signed); they only sleep until the test is done.
+img=$($SRC get cronjob ticket-backup -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}')
 pod() { # name namespace uid extra-env-yaml volume-mounts-yaml volumes-yaml
   cat <<EOF
 apiVersion: v1
@@ -36,7 +38,7 @@ spec:
     seccompProfile: { type: RuntimeDefault }
   containers:
     - name: main
-      image: postgres:16-alpine
+      image: $img
 $4
       resources: { limits: { cpu: "1", memory: 512Mi } }
       securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
