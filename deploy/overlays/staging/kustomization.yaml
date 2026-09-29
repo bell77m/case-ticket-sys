@@ -8,11 +8,11 @@ images:
   # .github/workflows/cd.yml replaces these after each green CI run on main: newName and the signed image's digest
   # (both images from the same commit). Interim registry GHCR; Harbor once T3.12 names the project.
   - name: ticket-app
-    newName: harbor.example.internal/ticket/ticket-app
-    newTag: v0.1.0
+    newName: ghcr.io/bell77m/case-ticket-sys/ticket-app
+    digest: sha256:a5d2a64579135f984f5125305b253b8f049a4c421ca289ebf3513b4963da8729
   - name: ticket-migrate
-    newName: harbor.example.internal/ticket/ticket-migrate
-    newTag: v0.1.0
+    newName: ghcr.io/bell77m/case-ticket-sys/ticket-migrate
+    digest: sha256:32a605cbe611bc1c31e5e2258557e06a0b5c50c8d6a14c1ca40771aa10d62571
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge
