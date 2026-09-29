@@ -101,10 +101,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Multi-stage: Node builds SvelteKit, Go embeds it and builds a static binary, distroless final image, non-root user.
     - Done when: `docker run` serves the app and the image is under 40 MB.
     - Status: done. Image 33.6 MB (was 43.9 MB: a woff2-only Vite plugin drops the legacy .woff fonts, and the unused 700 weight became the 500 the caption token uses). `docker run` on the compose network: /healthz 200, SPA routes, /api/locations in Thai, 401/404 JSON, user nonroot, `create-root-admin` runs inside the image.
-- [ ] **T1.21** CI pipeline, part 1 — M · deps: T1.20 · ops
+- [x] **T1.21** CI pipeline, part 1 — M · deps: T1.20 · ops
     - Lint, unit tests with coverage gate, i18n check, Gitleaks, Semgrep, govulncheck, Trivy filesystem scan.
     - Done when: a merge request with a planted test secret fails the pipeline.
-    - Status: workflow written (.github/workflows/ci.yml, GitHub Actions). Checked locally with the same tool versions: Gitleaks exits 1 on a planted GitHub token and finds nothing in the project; coverage 75.4% with -coverpkg; govulncheck found GO-2026-5970 (golang.org/x/text 0.29.0), fixed by upgrading to 0.39.0; Semgrep flagged path.Clean in web.go, fixed; Trivy clean. Open: the repo is not on GitHub yet, so the planted-secret pull request has not run there.
+    - Status: done. On GitHub, the pull request from ci/t1-21-planted-secret failed CI when Gitleaks found its fake token (github-pat, exit code 1), and the branch was then deleted unmerged. See [note](notes/T1.21.md).
 
 ## Phase 2 — Week 2: staff workflow
 
