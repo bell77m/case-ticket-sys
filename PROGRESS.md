@@ -19,6 +19,7 @@ Approved by the user on 2026-09-29, no review left: the decisions in the notes a
 
 ## Blockers
 
+- Blocked (2026-09-30, P.01): loading real data needs a human: the real buildings, floors, lines and categories (names in en, zh-CN, my and th), the staff accounts and their roles, who the second Root Admin is, and the T3.09 host to load them into. The admin pages (/staff/admin/lookups, /staff/admin/staff) and `ticket-app create-root-admin` already do the loading. P.02 and P.03 follow it.
 - Resolved (2026-09-29, T3.12): Docker Desktop's VM ran out of memory once Harbor and Kyverno joined the local cluster. The user stopped the old `kind-control-plane` container (`docker start kind-control-plane` brings it back), and Kyverno runs locally with the admission controller only. Check `docker stats --no-stream` before adding more platform pieces.
 - Real host (T3.09, ops on real hardware): still needed for production, the company network, the CA certificate and the pilot. Since 2026-09-28 the platform tasks are proven on a local k3s cluster in Docker instead (user's decision); each note lists what to repeat on the host.
 - Resolved (2026-09-29, T3.16, NFR-8): backups are encrypted with age; the private key is only in Vault (`secret/backup/<env>`) plus an offline copy ([note](docs/notes/2026-09-29-backup-encryption.md)). Still for the T3.09 host: make the keys and print the offline copy as in docs/RESTORE.md.

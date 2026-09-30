@@ -291,6 +291,7 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
 
 - [ ] **P.01** Load real data — S · deps: T3.15 · ops
     - Real buildings, floors, lines, categories; create staff accounts; second Root Admin.
+    - Status: blocked: needs the real list of buildings, floors, lines and categories in 4 languages, the staff who will use it and who the second Root Admin is, and the T3.09 host (see Blockers in PROGRESS.md).
 - [ ] **P.02** Run pilot — L · deps: P.01
     - IT team and one department use it for one week; collect feedback as tickets in the system.
 - [ ] **P.03** Fix and decide — M · deps: P.02
