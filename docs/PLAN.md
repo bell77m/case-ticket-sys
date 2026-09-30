@@ -261,9 +261,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Helm install with Raft, unseal ceremony (3 of 5 key holders), Kubernetes auth, audit device, VSO; app secrets for staging and prod.
     - Done when: app pods read secrets from VSO-created Secrets and nothing secret is in Git.
     - Status: done on the local k3s cluster (2026-09-28): Vault 2.0.4 (Raft, TLS, file audit device, 5 key shares / 3 to unseal) and VSO sync `ticket-app-secrets` and `ticket-app-tls` from `secret/ticket/<env>/*` with a read-only role per environment; the app runs on them, a changed value restarts the app and Redis, and Gitleaks finds nothing in Git. On the T3.09 host: the unseal ceremony with five key holders, the company-CA certificate for Vault, and the staging and prod values. See [note](notes/T3.11.md).
-- [ ] **T3.12** Harbor, signing, Kyverno — M · deps: T3.11 · ops · NFR-10
+- [x] **T3.12** Harbor, signing, Kyverno — M · deps: T3.11 · ops · NFR-10
     - Harbor project, Cosign key in Vault, Kyverno policies (signed Harbor images only, no root, limits required).
     - Done when: an unsigned image is refused by the cluster.
+    - Status: done on the local k3s cluster (2026-09-29). Harbor 2.15.2 holds private projects `ticket` and `dockerhub`, every image is signed with Vault transit key `cosign`, and Kyverno 1.19 refuses unsigned, other-key, non-Harbor, root and limit-less Pods (`make cluster-check-policies` 9/9). See [note](notes/T3.12.md).
 - [x] **T3.13** Kustomize manifests — L · deps: T1.20, T3.09 · ops
     - Base and staging/prod overlays: app (2 replicas, probes), PostgreSQL StatefulSet, Redis, Gotenberg, PVCs, goose PreSync Job.
     - Done when: kube-linter and Trivy config pass.
@@ -284,8 +285,8 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Playwright: guest submits with photo, staff logs in, assigns, resolves, guest confirms, dashboard updates; run in CI against staging.
     - Done when: suite passes in all 4 languages.
     - Also (from T2.14): add script-src and style-src to the CSP through `kit.csp` hashes, and run the e2e suite against the built app (Go serving the SPA) to prove nothing breaks.
-
     - Status: local part done (2026-09-29). `frontend/e2e/smoke.spec.ts` passes in all 4 languages against the built app, under the new `script-src`/`style-src` CSP, and CI runs it with the rest of the suite. Still to do: run it against staging once T3.15 deploys there, with test accounts for each role. See [note](notes/T3.17.md).
+
 ## Pilot — Week 4
 
 - [ ] **P.01** Load real data — S · deps: T3.15 · ops

@@ -1,0 +1,16 @@
+# Local k3d cluster only: the Kyverno policies with the local Harbor host (make cluster-kyverno).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../platform/policies
+patches:
+  - target: { kind: ValidatingPolicy, name: harbor-images-only }
+    patch: |-
+      - op: replace
+        path: /spec/variables/0/expression
+        value: "'harbor.localtest.me/'"
+  - target: { kind: ImageValidatingPolicy, name: harbor-signed-images }
+    patch: |-
+      - op: replace
+        path: /spec/matchImageReferences/0/glob
+        value: harbor.localtest.me/*

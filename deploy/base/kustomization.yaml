@@ -24,8 +24,9 @@ resources:
   - vault.yaml
   - backup.yaml
 images:
-  # Third-party images through Harbor's Docker Hub proxy cache: images come only from Harbor (.claude/rules/deploy.md).
-  # Placeholder host and project until T3.12; deploy/trivy-data.yaml names the same host.
+  # Third-party images as scanned and signed copies in Harbor project "dockerhub" (T3.12): images come only from Harbor
+  # and must be signed (.claude/rules/deploy.md). Placeholder host until T3.09; deploy/trivy-data.yaml and
+  # deploy/platform/policies name the same host.
   - name: postgres
     newName: harbor.example.internal/dockerhub/library/postgres
   - name: redis

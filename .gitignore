@@ -19,6 +19,8 @@ deploy/overlays/local/tls/
 deploy/local/vault-init.json
 deploy/local/argocd-deploy-key*
 deploy/local/argocd-approvers.yaml
+deploy/local/harbor-secrets.yaml
+deploy/local/harbor-robots.json
 
 # Tool state
 .remember/

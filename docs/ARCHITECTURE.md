@@ -113,5 +113,6 @@ Release flow:
 - Tag `vX.Y.Z` → production after manual approval in Argo CD.
 - Rollback: revert image tag in GitOps repo.
 - CI gets secrets from Vault via GitHub Actions OIDC tokens (JWT auth).
-- Kyverno: only Cosign-signed Harbor images, no root, CPU/memory limits required.
+- Kyverno: only Cosign-signed Harbor images, no root, CPU/memory limits required. Four CEL policies (deploy/platform/policies) cover every Pod outside the platform namespaces; the signature is checked against the public half of Vault transit key `cosign`, and each Pod is pinned to the digest that was verified.
+- Harbor projects: `ticket` (the app, migration and backup images) and `dockerhub` (signed copies of postgres, redis and gotenberg, not a proxy cache, so nothing unsigned reaches the cluster). Robot accounts: `pull` (nodes and Kyverno) and `ci` (push and sign).
 - Harbor nightly rescan; Renovate weekly update pull requests.

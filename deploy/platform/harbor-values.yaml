@@ -1,0 +1,48 @@
+# Harbor (T3.12, NFR-10), Helm chart harbor/harbor 1.19.2 (Harbor 2.15.2): the only registry the cluster pulls the
+# app's pods from. Kyverno (kyverno-values.yaml, policies/) refuses images from anywhere else and images without a
+# Cosign signature from the key in Vault. The same values serve the T3.09 host; the local k3d cluster adds
+# deploy/local/harbor-local-values.yaml.
+#
+# Projects (made by deploy/local/harbor-setup.sh, private): "ticket" for the app and migration images, "dockerhub"
+# for vetted copies of the third-party images (postgres, redis, gotenberg). Copies, not a proxy cache: a copy can be
+# scanned and signed before the cluster may run it, a proxied image cannot.
+#
+# Secrets (admin password, encryption key, database and internal passwords) are not here: they go in a separate
+# values file, -f harbor-secrets.yaml. On the local cluster `make` writes random ones to the gitignored
+# deploy/local/harbor-secrets.yaml; on the T3.09 host write that file from Vault at install time and delete it after.
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    # Secret harbor-tls (tls.crt, tls.key) in namespace harbor, created before install: from the company CA on the
+    # T3.09 host, from the local CA by `make cluster-harbor-tls` on the local cluster.
+    certSource: secret
+    secret:
+      secretName: harbor-tls
+  ingress:
+    className: nginx
+    hosts:
+      core: harbor.example.internal # placeholder until the T3.09 host has a name; kept equal in deploy/trivy-data.yaml
+    annotations:
+      # The chart's defaults are for the community ingress-nginx; the F5 controller reads nginx.org/* instead.
+      ingress.kubernetes.io/ssl-redirect: null
+      ingress.kubernetes.io/proxy-body-size: null
+      nginx.ingress.kubernetes.io/ssl-redirect: null
+      nginx.ingress.kubernetes.io/proxy-body-size: null
+      # Image layers (gotenberg's are hundreds of MB) stream through without a size cap or buffering.
+      nginx.org/client-max-body-size: "0"
+      nginx.org/proxy-buffering: "False"
+      nginx.org/proxy-read-timeout: 900s
+      nginx.org/proxy-send-timeout: 900s
+externalURL: https://harbor.example.internal
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      size: 100Gi
+    database:
+      size: 5Gi
+# Scans every pushed image and, with the daily "scan all" schedule set by harbor-setup.sh, rescans them nightly
+# (docs/ARCHITECTURE.md).
+trivy:
+  enabled: true

@@ -99,4 +99,24 @@ BACKUP_AGE_RECIPIENT="$recipient" node -e 'const l=require("fs").readFileSync(pr
 node -e 'const f=require("fs");process.stdout.write(JSON.stringify({data:{"tls.crt":f.readFileSync(process.argv[1],"utf8"),"tls.key":f.readFileSync(process.argv[2],"utf8")}}))' "$tls/tls.crt" "$tls/tls.key" |
 	v write "secret/data/ticket/$env/tls" - >/dev/null
 
+# T3.12: the Cosign key is a transit key; its private half never leaves Vault. Signers get a short-lived token with
+# policy cosign-sign, which may only sign and verify with it (push-images.sh skips images signed already) and read its
+# public half. Kyverno checks signatures against that public half, published as ConfigMap kyverno/cosign-public-key
+# (a rotated key needs every image signed again).
+v secrets list -format=json </dev/null | grep -q '"transit/"' || v secrets enable transit </dev/null
+v read transit/keys/cosign </dev/null >/dev/null 2>&1 || v write -f transit/keys/cosign type=ecdsa-p256 </dev/null >/dev/null
+printf 'path "transit/sign/cosign" {\n  capabilities = ["update"]\n}\npath "transit/sign/cosign/*" {\n  capabilities = ["update"]\n}\npath "transit/verify/cosign" {\n  capabilities = ["update"]\n}\npath "transit/verify/cosign/*" {\n  capabilities = ["update"]\n}\npath "transit/keys/cosign" {\n  capabilities = ["read"]\n}\n' |
+	v policy write cosign-sign - >/dev/null
+k create namespace kyverno --dry-run=client -o yaml | k apply -f - >/dev/null
+pub=$(mktemp -d)
+v read -format=json transit/keys/cosign </dev/null |
+	node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).data;process.stdout.write(d.keys[d.latest_version].public_key)' >"$pub/cosign.pub"
+k -n kyverno create configmap cosign-public-key --from-file="$(cygpath -m "$pub/cosign.pub" 2>/dev/null || echo "$pub/cosign.pub")" \
+	--dry-run=client -o yaml | k apply --server-side -f - >/dev/null
+rm -rf "$pub"
+# The CI robot's Harbor login (deploy/local/harbor-setup.sh), for CI to read with its own Vault role (T3.15).
+ci=$([ ! -e deploy/local/harbor-robots.json ] ||
+	node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).ci;if(r)process.stdout.write(JSON.stringify({data:{username:r.username,password:r.secret}}))' deploy/local/harbor-robots.json)
+[ -z "$ci" ] || printf '%s' "$ci" | v write secret/data/ticket/ci/harbor - >/dev/null
+
 echo "Vault ready: sealed=$(v0 status -format=json </dev/null | field sealed), secrets at secret/ticket/$env/{app,tls}"

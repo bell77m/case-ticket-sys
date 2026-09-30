@@ -1,0 +1,12 @@
+# Local k3d cluster only (make cluster-harbor), on top of deploy/platform/harbor-values.yaml. harbor.localtest.me
+# resolves to 127.0.0.1: on the node that is the ingress controller's port 443, so containerd pulls through the
+# ingress like the T3.09 host does; pods reach it through a CoreDNS entry (deploy/local/harbor-setup.sh). The browser
+# uses https://harbor.localtest.me:8443 (k3d maps 8443 to 443).
+expose:
+  ingress:
+    hosts:
+      core: harbor.localtest.me
+externalURL: https://harbor.localtest.me
+# Saves about 1 GB on a laptop; the scanner and its nightly rescan are proven on the T3.09 host.
+trivy:
+  enabled: false

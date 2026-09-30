@@ -22,7 +22,16 @@ trap 'rm -rf "$work"' EXIT
 # the node's LoadBalancer IP directly (the k3d port mapping on the host would give every client the same address).
 lb=$(k -n nginx-ingress get svc nginx-ingress-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 docker image inspect "$curl_img" >/dev/null 2>&1 || docker pull -q "$curl_img" >/dev/null
-k3d image import -c ticket-local "$curl_img" >/dev/null 2>&1
+# Pods inside the cluster must pass Kyverno (T3.12): the same curl as a signed copy in Harbor, non-root, with limits.
+bash deploy/local/push-images.sh "$curl_img" >/dev/null
+pod_img=harbor.localtest.me/dockerhub/$curl_img
+incluster() { # name, then curl's arguments
+	local name=$1
+	shift
+	k -n ticket-local run "$name" --rm -i --restart=Never --quiet --image="$pod_img" --override-type=strategic --overrides \
+		"{\"spec\":{\"securityContext\":{\"runAsNonRoot\":true,\"runAsUser\":100},\"containers\":[{\"name\":\"$name\",\"resources\":{\"limits\":{\"cpu\":\"100m\",\"memory\":\"64Mi\"}}}]}}" \
+		-- curl "$@"
+}
 ca_win=$(cygpath -w "$PWD/$ca" 2>/dev/null || echo "$PWD/$ca")
 # Each test client gets its own address on the cluster network (Docker would reuse one freed address for all). The
 # block changes every run, so the 15-minute login window of an earlier run cannot leak into this one.
@@ -39,8 +48,7 @@ case $code in 301 | 302 | 307 | 308) pass "plain HTTP redirects to HTTPS: $code"
 
 # 2. An address outside the company network is refused (NFR-4): a pod (10.42.0.0/16) is outside the local allow list.
 ingress_ip=$(k -n nginx-ingress get svc nginx-ingress-controller -o jsonpath='{.spec.clusterIP}')
-code=$(k -n ticket-local run outside-check --rm -i --restart=Never --quiet --image="$curl_img" -- \
-	curl -sk -o /dev/null -w '%{http_code}' --resolve "$host:443:$ingress_ip" "https://$host/healthz" | tr -d '\r')
+code=$(incluster outside-check -sk -o /dev/null -w '%{http_code}' --resolve "$host:443:$ingress_ip" "https://$host/healthz" | tr -d '\r')
 [ "$code" = 403 ] && pass "outside address (pod network) refused: 403" || fail "outside address got $code"
 
 # 3. FR-A11 through the ingress: 20 failed logins from client A (different usernames, so only the IP limit counts)
@@ -93,8 +101,7 @@ case " $codes " in *" 429 "*) pass "/api/track burst limited by NGINX (429 seen)
 
 # 8. No pod but the ingress controller (and Gotenberg) reaches the app directly (NetworkPolicy ticket-app-ingress-only),
 # so nothing inside the cluster can forge X-Forwarded-For past the allow list.
-code=$(k -n ticket-local run direct-check --rm -i --restart=Never --quiet --image="$curl_img" -- \
-	curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://ticket-app:8080/healthz | tr -d '\r' || true)
+code=$(incluster direct-check -s -o /dev/null -w '%{http_code}' --max-time 5 http://ticket-app:8080/healthz | tr -d '\r' || true)
 [ "$code" = 000 ] && pass "a pod calling the app Service directly is blocked" || fail "direct call from a pod answered $code"
 
 # 9. PDF export still works through the ingress: Gotenberg may reach the app's print page (FR-P4).

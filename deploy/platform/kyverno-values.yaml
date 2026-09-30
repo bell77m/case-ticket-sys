@@ -1,0 +1,9 @@
+# Kyverno (T3.12, NFR-10), Helm chart kyverno/kyverno 3.9.1 (Kyverno 1.19.1). The policies are in policies/ (CEL
+# policy types; ClusterPolicy is deprecated in 1.19 and goes in 1.20). The same values serve the T3.09 host.
+#
+# Kyverno fetches signatures from Harbor itself, so it must trust Harbor's certificate: global.caCertificates.data
+# replaces its CA bundle with the company CA on the T3.09 host (the local CA on the local cluster, set by
+# `make cluster-kyverno`). Harbor is the only registry it talks to.
+admissionController:
+  # One node locally and on the first T3.09 host; 3 once there are 3 nodes, so a restart never blocks every pod.
+  replicas: 1

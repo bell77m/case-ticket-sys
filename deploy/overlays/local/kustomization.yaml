@@ -1,7 +1,7 @@
-# Local test cluster only (make cluster-deploy), never staging or prod: the base manifests with images built from
-# this checkout and third-party images straight from Docker Hub (no Harbor locally). Secrets come from the local
-# Vault through VSO like everywhere else (T3.11): deploy/local/vault-setup.sh writes the random values from the
-# gitignored secrets.env and tls/ into Vault, so no secret value is in Git or in a manifest.
+# Local test cluster only (make cluster-deploy), never staging or prod: the base manifests with images from the local
+# Harbor (T3.12). Secrets come from the local Vault through VSO like everywhere else (T3.11): deploy/local/vault-setup.sh
+# writes the random values from the gitignored secrets.env and tls/ into Vault, so no secret value is in Git or in a
+# manifest.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: ticket-local
@@ -9,20 +9,23 @@ resources:
   - namespace.yaml
   - ../../base
 images:
-  # Built and loaded by `make cluster-images` (k3d image import); all from the same checkout.
+  # From the local Harbor (T3.12), pushed and signed by `make cluster-images`: ours built from this checkout, the
+  # third-party ones copied from the host's Docker. Kyverno pins each Pod to the digest it verified.
   - name: ticket-app
+    newName: harbor.localtest.me/ticket/ticket-app
     newTag: local
   - name: ticket-migrate
+    newName: harbor.localtest.me/ticket/ticket-migrate
     newTag: local
   - name: ticket-backup
+    newName: harbor.localtest.me/ticket/ticket-backup
     newTag: local
-  # The base maps these to the Harbor proxy (T3.12); locally they come from Docker Hub.
   - name: harbor.example.internal/dockerhub/library/postgres
-    newName: postgres
+    newName: harbor.localtest.me/dockerhub/library/postgres
   - name: harbor.example.internal/dockerhub/library/redis
-    newName: redis
+    newName: harbor.localtest.me/dockerhub/library/redis
   - name: harbor.example.internal/dockerhub/gotenberg/gotenberg
-    newName: gotenberg/gotenberg
+    newName: harbor.localtest.me/dockerhub/gotenberg/gotenberg
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge

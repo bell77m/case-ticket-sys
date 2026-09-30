@@ -1,0 +1,103 @@
+# Cluster rules from docs/ARCHITECTURE.md (T3.12, NFR-10), enforced by Kyverno (../kyverno-values.yaml) on every Pod
+# outside the platform namespaces: images only from Harbor and signed with the Cosign key in Vault, no root, CPU and
+# memory limits. A Pod that breaks one is refused when it is created. Which Pods: kustomization.yaml gives every
+# policy the same matchConstraints (Pods in any namespace but the platform ones, which run their vendors' images and
+# are left out by name, so a new namespace is covered by default).
+#
+# The Harbor host is a placeholder, kept equal in deploy/base/kustomization.yaml and deploy/trivy-data.yaml; the local
+# cluster patches it in deploy/local/policies/kustomization.yaml.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: harbor-images-only
+spec:
+  validationActions: [Deny]
+  variables:
+    - name: harbor
+      expression: "'harbor.example.internal/'"
+    - name: images
+      expression: >-
+        (object.spec.containers + object.spec.?initContainers.orValue([]) +
+        object.spec.?ephemeralContainers.orValue([])).map(c, c.image)
+  validations:
+    - expression: variables.images.all(i, i.startsWith(variables.harbor))
+      messageExpression: "'images must come from Harbor (' + variables.harbor + '), got: ' + variables.images.filter(i, !i.startsWith(variables.harbor)).join(', ')"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: harbor-signed-images
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  evaluation:
+    background:
+      enabled: false
+  # Pods only: the tag-to-digest mutation below must not touch Deployments, or Argo CD would see drift and undo it.
+  autogen:
+    podControllers:
+      controllers: []
+  matchImageReferences:
+    - glob: harbor.example.internal/*
+  # The pull robot (deploy/local/harbor-setup.sh), in Kyverno's namespace.
+  credentials:
+    secrets: [harbor-pull]
+  # Each Pod runs the exact digest that was verified, not whatever the tag points to by the time the node pulls.
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  variables:
+    # The public half of the transit key "cosign" in Vault, published by vault-setup.sh (docs/notes/T3.12.md).
+    - name: keys
+      expression: resource.Get("v1", "configmaps", "kyverno", "cosign-public-key")
+  attestors:
+    - name: vault
+      cosign:
+        key:
+          expression: variables.keys.data["cosign.pub"]
+        # Signed with a private key, not keylessly: there is no transparency log entry to check.
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        (images.containers + images.?initContainers.orValue([]) + images.?ephemeralContainers.orValue([])).all(i,
+        verifyImageSignatures(i, [attestors.vault]) > 0)
+      message: images must carry a Cosign signature from the key in Vault (unsigned or signed by another key)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-non-root
+spec:
+  validationActions: [Deny]
+  variables:
+    - name: ctnrs
+      expression: >-
+        object.spec.containers + object.spec.?initContainers.orValue([]) +
+        object.spec.?ephemeralContainers.orValue([])
+  validations:
+    # runAsNonRoot on the Pod (no container turning it off) or on every container; the kubelet then refuses UID 0.
+    - expression: >-
+        (object.spec.?securityContext.?runAsNonRoot.orValue(false) &&
+        variables.ctnrs.all(c, c.?securityContext.?runAsNonRoot.orValue(true))) ||
+        variables.ctnrs.all(c, c.?securityContext.?runAsNonRoot.orValue(false))
+      message: containers must not run as root (set securityContext.runAsNonRoot to true)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-limits
+spec:
+  validationActions: [Deny]
+  variables:
+    - name: ctnrs
+      expression: >-
+        object.spec.containers + object.spec.?initContainers.orValue([])
+  validations:
+    - expression: >-
+        variables.ctnrs.all(c, c.?resources.?limits.?cpu.hasValue() && c.?resources.?limits.?memory.hasValue())
+      messageExpression: "'every container needs CPU and memory limits, missing on: ' + variables.ctnrs.filter(c, !(c.?resources.?limits.?cpu.hasValue() && c.?resources.?limits.?memory.hasValue())).map(c, c.name).join(', ')"

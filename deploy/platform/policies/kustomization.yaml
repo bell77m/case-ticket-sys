@@ -1,0 +1,24 @@
+# Kyverno policies (T3.12); applied after Kyverno is installed (make cluster-kyverno locally).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - policies.yaml
+patches:
+  # One scope for every policy: Pods created or changed outside the platform namespaces. `kubectl debug` adds its
+  # container through the pods/ephemeralcontainers subresource, so that is matched too.
+  - target: { group: policies.kyverno.io }
+    patch: |-
+      - op: add
+        path: /spec/matchConstraints
+        value:
+          namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values: [kube-system, kube-public, kube-node-lease, kyverno, harbor, nginx-ingress, vault,
+                  vault-secrets-operator-system, argocd]
+          resourceRules:
+            - apiGroups: ['']
+              apiVersions: [v1]
+              operations: [CREATE, UPDATE]
+              resources: [pods, pods/ephemeralcontainers]

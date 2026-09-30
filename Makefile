@@ -107,6 +107,41 @@ deploy/overlays/local/tls/vault.crt: deploy/overlays/local/tls/tls.crt
 	openssl x509 -req -in $(@D)/vault.csr -CA $(@D)/ca.crt -CAkey $(@D)/ca.key -CAcreateserial -days 365 \
 		-extfile $(@D)/vault-san.ext -out $@
 
+# Harbor (T3.12): the registry the app's pods pull from, with its projects, robot accounts and the node's pull config
+# set by deploy/local/harbor-setup.sh. Needs Vault unsealed (make cluster-vault): the CI robot's secret goes there.
+HARBOR_CHART_VERSION := 1.19.2
+.PHONY: cluster-harbor
+cluster-harbor: deploy/overlays/local/tls/harbor.crt deploy/local/harbor-secrets.yaml
+	kubectl $(KCTX) create namespace harbor --dry-run=client -o yaml | kubectl $(KCTX) apply -f - >/dev/null
+	kubectl $(KCTX) -n harbor create secret tls harbor-tls --cert=deploy/overlays/local/tls/harbor.crt \
+		--key=deploy/overlays/local/tls/harbor.key --dry-run=client -o yaml | kubectl $(KCTX) apply --server-side -f -
+	helm repo add harbor https://helm.goharbor.io --force-update
+	helm upgrade --install harbor harbor/harbor --version $(HARBOR_CHART_VERSION) $(HELM_LOCAL) -n harbor \
+		-f deploy/platform/harbor-values.yaml -f deploy/local/harbor-local-values.yaml -f deploy/local/harbor-secrets.yaml \
+		--wait --timeout 15m
+	bash deploy/local/harbor-setup.sh
+
+# Kyverno (T3.12) trusting only the local CA (Harbor's), then the policies with the local Harbor host. Needs
+# cluster-harbor (pull Secret) and cluster-vault (the public key ConfigMap) first.
+KYVERNO_CHART_VERSION := 3.9.1
+.PHONY: cluster-kyverno
+cluster-kyverno:
+	helm repo add kyverno https://kyverno.github.io/kyverno/ --force-update
+	helm upgrade --install kyverno kyverno/kyverno --version $(KYVERNO_CHART_VERSION) $(HELM_LOCAL) -n kyverno \
+		-f deploy/platform/kyverno-values.yaml -f deploy/local/kyverno-local-values.yaml \
+		--set-file global.caCertificates.data=deploy/overlays/local/tls/ca.crt --wait --timeout 10m
+	kubectl $(KCTX) apply -k deploy/local/policies
+
+deploy/overlays/local/tls/harbor.crt: deploy/overlays/local/tls/tls.crt
+	MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes -subj "/CN=harbor.localtest.me" -keyout $(@D)/harbor.key -out $(@D)/harbor.csr
+	printf 'subjectAltName=DNS:harbor.localtest.me\n' > $(@D)/harbor-san.ext
+	openssl x509 -req -in $(@D)/harbor.csr -CA $(@D)/ca.crt -CAkey $(@D)/ca.key -CAcreateserial -days 365 \
+		-extfile $(@D)/harbor-san.ext -out $@
+
+# Random Harbor secrets, written once (gitignored). secretKey and the internal secrets must be exactly 16 characters.
+deploy/local/harbor-secrets.yaml:
+	node -e 'const r=n=>require("crypto").randomBytes(n).toString("hex");process.stdout.write(JSON.stringify({harborAdminPassword:r(16),secretKey:r(8),core:{secret:r(8),xsrfKey:r(16)},jobservice:{secret:r(8)},registry:{secret:r(8),credentials:{password:r(16)}},database:{internal:{password:r(16)}}},null,2)+"\n")' > $@
+
 # A throwaway local CA and a certificate for tickets.localtest.me (gitignored); curl --cacert tls/ca.crt trusts it.
 deploy/overlays/local/tls/tls.crt:
 	mkdir -p $(@D)
@@ -117,13 +152,15 @@ deploy/overlays/local/tls/tls.crt:
 	openssl x509 -req -in $(@D)/tls.csr -CA $(@D)/ca.crt -CAkey $(@D)/ca.key -CAcreateserial -days 365 \
 		-extfile $(@D)/san.ext -out $@
 
-# Third-party images come from the host's Docker (pulled once there), which is far faster than pulling in-cluster.
+# Images are built or pulled on the host's Docker (far faster than pulling in-cluster), then pushed to the local
+# Harbor and signed with the Cosign key in Vault (T3.12): Kyverno lets the cluster run nothing else.
 LOCAL_THIRD_PARTY := postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8
 cluster-images:
 	docker build -t ticket-app:local .
 	docker build -f deploy/migrate.Dockerfile -t ticket-migrate:local .
+	docker build -f deploy/backup.Dockerfile -t ticket-backup:local .
 	for i in $(LOCAL_THIRD_PARTY); do docker image inspect $$i >/dev/null 2>&1 || docker pull $$i || exit 1; done
-	k3d image import -c ticket-local ticket-app:local ticket-migrate:local ticket-backup:local $(LOCAL_THIRD_PARTY)
+	bash deploy/local/push-images.sh ticket-app:local ticket-migrate:local ticket-backup:local $(LOCAL_THIRD_PARTY)
 
 # Random passwords, written once; the file is gitignored and loaded into the local Vault by deploy/local/vault-setup.sh.
 deploy/overlays/local/secrets.env:
@@ -143,11 +180,10 @@ cluster-deploy: cluster-images cluster-vault
 	kubectl $(KCTX) -n ticket-local rollout restart deploy/ticket-app
 	kubectl $(KCTX) -n ticket-local rollout status deploy/ticket-app --timeout=5m
 
-.PHONY: cluster-seed cluster-check-ingress cluster-restore-test
+.PHONY: cluster-seed cluster-check-ingress cluster-restore-test cluster-check-policies
 # Dev sample locations and the dev staff (root, agent, viewer / dev-password) in the cluster's database.
 cluster-seed:
 	kubectl $(KCTX) -n ticket-local exec -i postgres-0 -- psql -U ticket -d ticket -v ON_ERROR_STOP=1 -q < backend/seed/dev.sql
-	docker build -f deploy/backup.Dockerfile -t ticket-backup:local .
 
 # T3.10 checks through the ingress (HTTPS, allow list, per-client login limit, SSE, uploads, /api/track limit, logs).
 cluster-check-ingress:
@@ -164,6 +200,10 @@ cluster-vault-backup: cluster-vault
 	kubectl $(KCTX) apply -f deploy/platform/vault-backup.yaml
 cluster-vault-restore-test:
 	bash deploy/local/vault-restore-test.sh
+
+# T3.12: unsigned, non-Harbor, root and limit-less Pods are refused; signed Harbor images run as verified digests.
+cluster-check-policies:
+	bash deploy/local/policy-check.sh
 
 cluster-down:
 	k3d cluster delete ticket-local
@@ -184,13 +224,13 @@ cluster-argocd: deploy/local/argocd-deploy-key
 		| kubectl label --local -f - argocd.argoproj.io/secret-type=repository -o yaml | kubectl $(KCTX) apply --server-side -f -
 	kubectl $(KCTX) apply -f deploy/argocd/project.yaml -f deploy/argocd/local/ticket-local.yaml
 
-# A read-only deploy key, registered once on GitHub (needs `gh` signed in). Revoke it in the repo's Deploy keys page.
-deploy/local/argocd-deploy-key:
-	ssh-keygen -q -t ed25519 -N "" -C "argocd ticket-local (k3d)" -f $@
-	gh repo deploy-key add $@.pub --repo bell77m/case-ticket-sys --title "argocd ticket-local (k3d), read-only"
 # A named account that may sync production (role:prod-approver): make cluster-argocd-approver NAME=alice. Prints a
 # temporary password once (deploy/local/argocd-approver.sh).
 .PHONY: cluster-argocd-approver
 cluster-argocd-approver:
 	bash deploy/local/argocd-approver.sh $(NAME)
 
+# A read-only deploy key, registered once on GitHub (needs `gh` signed in). Revoke it in the repo's Deploy keys page.
+deploy/local/argocd-deploy-key:
+	ssh-keygen -q -t ed25519 -N "" -C "argocd ticket-local (k3d)" -f $@
+	gh repo deploy-key add $@.pub --repo bell77m/case-ticket-sys --title "argocd ticket-local (k3d), read-only"

@@ -1,0 +1,9 @@
+# Local k3d cluster only (make cluster-kyverno), on top of deploy/platform/kyverno-values.yaml. The laptop's Docker VM
+# has about 7 GB for everything, so only the admission controller runs: it alone admits or refuses Pods. Policy
+# reports, background scans and cleanup policies stay on the T3.09 host.
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+reportsController:
+  enabled: false
