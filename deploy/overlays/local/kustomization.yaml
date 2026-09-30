@@ -10,16 +10,17 @@ resources:
   - ../../base
 images:
   # From the local Harbor (T3.12), pushed and signed by `make cluster-images`: ours built from this checkout, the
+
   # third-party ones copied from the host's Docker. Kyverno pins each Pod to the digest it verified.
   - name: ticket-app
     newName: harbor.localtest.me/ticket/ticket-app
-    newTag: local
+    digest: sha256:4fb06a74bcf1c7779342cf174e9e063b6eff1deb52e63644a0ee91aa8598553f
   - name: ticket-migrate
     newName: harbor.localtest.me/ticket/ticket-migrate
-    newTag: local
+    digest: sha256:14517b88571b66035b49d074c6c033145849b4214c6a61d9af400d5b80c2aa17
   - name: ticket-backup
     newName: harbor.localtest.me/ticket/ticket-backup
-    newTag: local
+    digest: sha256:bb6f5cfc46a71f2c471ba93d04910b7c2382fa05f130360263f824cc7ba9ab21
   - name: harbor.example.internal/dockerhub/library/postgres
     newName: harbor.localtest.me/dockerhub/library/postgres
   - name: harbor.example.internal/dockerhub/library/redis
@@ -34,34 +35,36 @@ configMapGenerator:
       - BASE_URL=https://tickets.localtest.me:8443
 patches:
   # Locally the "company network" is Docker's address pool (the host and test containers). In-cluster pods
+
   # (10.42.0.0/16) are outside it, which is how the refused-IP check is done (T3.10).
-  - target: { kind: Policy, name: company-network }
+  - target: {kind: Policy, name: company-network}
     patch: |-
       - op: replace
         path: /spec/accessControl/allow
         value: [172.16.0.0/12]
-  - target: { kind: Ingress }
+  - target: {kind: Ingress}
     patch: |-
       - op: replace
         path: /spec/rules/0/host
         value: tickets.localtest.me
-  - target: { kind: Ingress, name: ticket-app }
+  - target: {kind: Ingress, name: ticket-app}
     patch: |-
       - op: replace
         path: /spec/tls/0/hosts/0
         value: tickets.localtest.me
-  # Vault role and paths for this environment (deploy/local/vault-setup.sh creates them).
-  - target: { kind: VaultAuth, name: ticket-app }
+  - target: {kind: VaultAuth, name: ticket-app}
+    # Vault role and paths for this environment (deploy/local/vault-setup.sh creates them).
+
     patch: |-
       - op: replace
         path: /spec/kubernetes/role
         value: ticket-local
-  - target: { kind: VaultStaticSecret, name: ticket-app-secrets }
+  - target: {kind: VaultStaticSecret, name: ticket-app-secrets}
     patch: |-
       - op: replace
         path: /spec/path
         value: ticket/local/app
-  - target: { kind: VaultStaticSecret, name: ticket-app-tls }
+  - target: {kind: VaultStaticSecret, name: ticket-app-tls}
     patch: |-
       - op: replace
         path: /spec/path
