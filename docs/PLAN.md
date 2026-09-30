@@ -281,11 +281,11 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Nightly CronJob: pg_dump and uploads to NFS; documented restore steps.
     - Done when: a restore into a scratch namespace brings back tickets and evidence.
     - Status: done. The nightly CronJob `ticket-backup` writes a checksummed pg_dump and uploads tar (14 days kept); on the local cluster `make cluster-restore-test` restores into `ticket-restore` with equal counts, files and checksums, and docs/RESTORE.md's in-place restore was drilled. Still to do on the T3.09 host: the NFS share, locked to the node. See [note](notes/T3.16.md).
-- [ ] **T3.17** End-to-end smoke tests — M · deps: T3.04, T3.15 · fe
+- [x] **T3.17** End-to-end smoke tests — M · deps: T3.04, T3.15 · fe
     - Playwright: guest submits with photo, staff logs in, assigns, resolves, guest confirms, dashboard updates; run in CI against staging.
     - Done when: suite passes in all 4 languages.
     - Also (from T2.14): add script-src and style-src to the CSP through `kit.csp` hashes, and run the e2e suite against the built app (Go serving the SPA) to prove nothing breaks.
-    - Status: local part done (2026-09-29). `frontend/e2e/smoke.spec.ts` passes in all 4 languages against the built app, under the new `script-src`/`style-src` CSP, and CI runs it with the rest of the suite. Still to do: run it against staging once T3.15 deploys there, with test accounts for each role. See [note](notes/T3.17.md).
+    - Status: done. The 4-language smoke suite passes against the built app under the script/style CSP (2026-09-29) and, since 2026-09-30, runs in CD after every deploy to the local cluster (staging stand-in), through its ingress: 5 passed in CD local run 36700248660. Real staging needs its own test accounts (T3.09). See [note](notes/T3.17.md).
 
 ## Pilot — Week 4
 
