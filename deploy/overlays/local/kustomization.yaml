@@ -9,10 +9,12 @@ resources:
   - namespace.yaml
   - ../../base
 images:
-  # Built and loaded by `make cluster-images` (k3d image import); both from the same checkout.
+  # Built and loaded by `make cluster-images` (k3d image import); all from the same checkout.
   - name: ticket-app
     newTag: local
   - name: ticket-migrate
+    newTag: local
+  - name: ticket-backup
     newTag: local
   # The base maps these to the Harbor proxy (T3.12); locally they come from Docker Hub.
   - name: harbor.example.internal/dockerhub/library/postgres

@@ -5,19 +5,30 @@
 	import { getLocale } from '$lib/paraglide/runtime';
 	import { formatDuration } from '$lib/report-summary';
 
-	/** links: cards that match a queue filter open it (the dashboard; the PDF has none). */
-	let { report, links = true }: { report: Report; links?: boolean } = $props();
+	/** links: each card opens the queue with exactly its tickets (the dashboard; the PDF has none).
+	 *  scope: the report's building, category_id and tz, as URL parameters, added to every link. */
+	let { report, links = true, scope = '' }: { report: Report; links?: boolean; scope?: string } = $props();
 
 	// Intl in the viewer's language (FR-I5).
 	const locale = getLocale();
 	const num = new Intl.NumberFormat(locale).format;
 	const signed = new Intl.NumberFormat(locale, { signDisplay: 'exceptZero' }).format;
 
-	// Summary cards in REQUIREMENTS §5 order. Links open the queue's closest filter; it has no date, building or
-	// category filter and shows tickets as they are now (DESIGN.md "Reports dashboard").
-	const open = '/staff?status=open';
+	// Summary cards in REQUIREMENTS §5 order. Each link opens the queue with the card's own tickets, so the queue
+	// total equals the card (FR-P1; TestQueueMatchesReportCards_FRP1): open counts use the state at the period end
+	// (as_of), New and Resolved the period on created or resolved time, and a median links to the tickets it is
+	// measured over (DESIGN.md "Reports dashboard").
+	const link = (extra: Record<string, string>) => {
+		const p = new URLSearchParams(scope);
+		for (const [k, v] of Object.entries(extra)) p.set(k, v);
+		return `/staff?${p}`;
+	};
 	const cards = $derived.by(() => {
 		const c = report.cards;
+		const { from, to } = report.period;
+		const open = { status: 'open', as_of: to };
+		const created = link({ status: 'all', by: 'created', from, to });
+		const resolved = link({ status: 'all', by: 'resolved', from, to });
 		const tile = (key: string, label: string, card: ReportCard<number | null>, isDuration: boolean, href?: string) => {
 			const diff = card.value === null || card.previous === null ? null : card.value - card.previous;
 			const change =
@@ -26,13 +37,13 @@
 			return { key, label, value, href: links ? href : undefined, diff, change, hasValue: card.value !== null };
 		};
 		return [
-			tile('open', m.reports_card_open(), c.open, false, open),
-			tile('unassigned', m.reports_card_unassigned(), c.unassigned, false, `${open}&assignee=none`),
-			tile('urgent', m.reports_card_urgent(), c.urgent_open, false, `${open}&priority=urgent`),
-			tile('new', m.reports_card_new(), c.new, false, '/staff?status=new'),
-			tile('resolved', m.reports_card_resolved(), c.resolved, false, '/staff?status=resolved'),
-			tile('first', m.reports_card_first_response(), c.first_response_median_seconds, true),
-			tile('resolution', m.reports_card_resolution(), c.resolution_median_seconds, true)
+			tile('open', m.reports_card_open(), c.open, false, link(open)),
+			tile('unassigned', m.reports_card_unassigned(), c.unassigned, false, link({ ...open, assignee: 'none' })),
+			tile('urgent', m.reports_card_urgent(), c.urgent_open, false, link({ ...open, priority: 'urgent' })),
+			tile('new', m.reports_card_new(), c.new, false, created),
+			tile('resolved', m.reports_card_resolved(), c.resolved, false, resolved),
+			tile('first', m.reports_card_first_response(), c.first_response_median_seconds, true, created),
+			tile('resolution', m.reports_card_resolution(), c.resolution_median_seconds, true, resolved)
 		];
 	});
 </script>

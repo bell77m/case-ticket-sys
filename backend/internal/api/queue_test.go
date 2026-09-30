@@ -133,6 +133,62 @@ func TestQueue_SearchThaiBurmese_T118(t *testing.T) {
 	})
 }
 
+// FR-P1 ("click opens filtered queue"): each summary card's number equals the queue total behind its link, built as
+// frontend/src/lib/components/ReportCards.svelte builds it. Open, Unassigned and Urgent open use the state as of
+// the period end (as_of), New and Resolved the period on created_at or resolved_at; building and category scope all.
+func TestQueueMatchesReportCards_FRP1(t *testing.T) {
+	e := newAuthEnv(t)
+	f := e.reportData()
+	open := "status=new&status=in_progress&status=waiting"
+	cards := []struct{ card, link string }{
+		{"open", open + "&as_of=%[2]s"},
+		{"unassigned", open + "&as_of=%[2]s&assignee=none"},
+		{"urgent_open", open + "&as_of=%[2]s&priority=urgent"},
+		{"new", "by=created&from=%[1]s&to=%[2]s"},
+		{"resolved", "by=resolved&from=%[1]s&to=%[2]s"},
+	}
+	for _, scope := range []struct{ name, from, to, extra string }{
+		{"building", "2020-03-01", "2020-03-10", "&tz=UTC"},
+		{"category", "2020-03-01", "2020-03-10", fmt.Sprintf("&tz=UTC&category_id=%d", f.cat)},
+		{"bangkok day", "2020-03-10", "2020-03-10", "&tz=Asia/Bangkok"},
+	} {
+		t.Run(scope.name, func(t *testing.T) {
+			filters := scope.extra + "&building=" + url.QueryEscape(f.building)
+			var report struct {
+				Cards map[string]struct{ Value int64 }
+			}
+			e.getJSON(fmt.Sprintf("/api/staff/reports?from=%s&to=%s%s", scope.from, scope.to, filters), f.viewer, &report)
+			for _, c := range cards {
+				link := fmt.Sprintf(c.link, scope.from, scope.to) + filters
+				if got, want := e.getQueue(link, f.viewer).Total, report.Cards[c.card].Value; got != want {
+					t.Errorf("%s: queue ?%s total = %d, card = %d", c.card, link, got, want)
+				}
+			}
+		})
+	}
+}
+
+// FR-P1: the report filters on the queue are checked like the report's own (FR-P2).
+func TestQueue_BadReportFilters_FRP1(t *testing.T) {
+	e := newAuthEnv(t)
+	c := e.session(e.newStaff("Agent", true))
+	for _, tt := range []struct{ query, want string }{
+		{"from=2020-13-01", `{"from":"invalid"}`},
+		{"to=10-03-2020", `{"to":"invalid"}`},
+		{"from=2020-03-10&to=2020-03-09", `{"to":"invalid"}`},
+		{"as_of=2020-02-30", `{"as_of":"invalid"}`},
+		{"by=updated&from=2020-03-01", `{"by":"invalid"}`},
+		{"tz=Mars/Olympus&as_of=2020-03-01", `{"tz":"invalid"}`},
+		{"category_id=0", `{"category_id":"invalid"}`},
+		{"building=" + strings.Repeat("b", 201), `{"building":"too_long"}`},
+	} {
+		rec := e.withCookie(http.MethodGet, "/api/staff/tickets?"+tt.query, c)
+		if want := `{"error":"validation","fields":` + tt.want + "}\n"; rec.Code != http.StatusBadRequest || rec.Body.String() != want {
+			t.Errorf("%s = %d %s, want 400 %s", tt.query, rec.Code, rec.Body, want)
+		}
+	}
+}
+
 func TestQueue_BadFilters_T118(t *testing.T) {
 	e := newAuthEnv(t)
 	c := e.session(e.newStaff("Agent", true))

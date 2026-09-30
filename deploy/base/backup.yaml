@@ -1,6 +1,6 @@
-# Nightly backup (T3.16, NFR-8): a pg_dump of the database and a tar of the evidence uploads, written to one dated
-# folder on the backup volume with a SHA256SUMS file. Folders older than BACKUP_KEEP_DAYS are deleted.
-# Restore steps and the restore test: docs/RESTORE.md.
+# Nightly backup (T3.16, NFR-8): a pg_dump of the database and a tar of the evidence uploads, each encrypted with age
+# to the environment's backup recipient, written to one dated folder on the backup volume with a SHA256SUMS file.
+# Folders older than BACKUP_KEEP_DAYS are deleted. Restore steps and the restore test: docs/RESTORE.md.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -34,20 +34,23 @@ spec:
               type: RuntimeDefault
           containers:
             - name: backup
-              image: postgres:16-alpine # pg_dump from the same major version as the server
+              image: ticket-backup # deploy/backup.Dockerfile: PostgreSQL 16 client tools and age
               command:
                 - /bin/sh
                 - -c
                 # The dump comes first and the uploads second: the app writes a file before its attachment row, so
                 # every row in the dump has its file in the tar. The folder gets its final name only when complete.
+                # Only the public recipient is here; the private identity stays in Vault (docs/RESTORE.md).
                 - |
                   set -eu
+                  set -o pipefail # a failed pg_dump or tar fails the run, even though age ends the pipe
                   umask 077 # the set holds internal notes, audit IPs and evidence: only this user may read it
+                  [ -n "$BACKUP_AGE_RECIPIENT" ] || { echo "BACKUP_AGE_RECIPIENT is empty" >&2; exit 1; }
                   set_dir=/backups/$(date -u +%Y-%m-%dT%H%M%SZ)
                   mkdir "$set_dir.partial"
-                  pg_dump --format=custom --file="$set_dir.partial/ticket.dump"
-                  tar -C /data/uploads -cf "$set_dir.partial/uploads.tar" .
-                  cd "$set_dir.partial" && sha256sum ticket.dump uploads.tar > SHA256SUMS && cd /
+                  pg_dump --format=custom | age -r "$BACKUP_AGE_RECIPIENT" -o "$set_dir.partial/ticket.dump.age"
+                  tar -C /data/uploads -cf - . | age -r "$BACKUP_AGE_RECIPIENT" -o "$set_dir.partial/uploads.tar.age"
+                  cd "$set_dir.partial" && sha256sum ticket.dump.age uploads.tar.age > SHA256SUMS && cd /
                   mv "$set_dir.partial" "$set_dir"
                   find /backups -mindepth 1 -maxdepth 1 -type d -mtime +"$BACKUP_KEEP_DAYS" -exec rm -rf {} \;
                   ls -l "$set_dir"
@@ -63,6 +66,11 @@ spec:
                     secretKeyRef:
                       name: ticket-app-secrets
                       key: POSTGRES_PASSWORD
+                - name: BACKUP_AGE_RECIPIENT # public key (age1...), from Vault with the app secrets
+                  valueFrom:
+                    secretKeyRef:
+                      name: ticket-app-secrets
+                      key: BACKUP_AGE_RECIPIENT
                 - name: BACKUP_KEEP_DAYS
                   value: "14"
               resources:
@@ -94,7 +102,7 @@ spec:
 ---
 # The backup target. On the T3.09 host this must be the NFS share (the NFS storage class or a static NFS volume),
 # never the disk that holds the database and uploads; the local cluster uses local-path as a stand-in. The files are
-# not encrypted: export the share only to the cluster node's IP, with root_squash (docs/RESTORE.md).
+# encrypted, but still export the share only to the cluster node's IP, with root_squash (docs/RESTORE.md).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

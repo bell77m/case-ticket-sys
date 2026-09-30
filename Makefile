@@ -123,15 +123,16 @@ cluster-images:
 	docker build -t ticket-app:local .
 	docker build -f deploy/migrate.Dockerfile -t ticket-migrate:local .
 	for i in $(LOCAL_THIRD_PARTY); do docker image inspect $$i >/dev/null 2>&1 || docker pull $$i || exit 1; done
-	k3d image import -c ticket-local ticket-app:local ticket-migrate:local $(LOCAL_THIRD_PARTY)
+	k3d image import -c ticket-local ticket-app:local ticket-migrate:local ticket-backup:local $(LOCAL_THIRD_PARTY)
 
 # Random passwords, written once; the file is gitignored and loaded into the local Vault by deploy/local/vault-setup.sh.
 deploy/overlays/local/secrets.env:
 	node -e 'const r=()=>require("crypto").randomBytes(16).toString("hex");const o=r(),a=r(),d=r();process.stdout.write(["POSTGRES_PASSWORD="+o,"TICKET_APP_DB_PASSWORD="+a,"REDIS_PASSWORD="+d,"DATABASE_URL=postgres://ticket_app:"+a+"@postgres:5432/ticket?sslmode=disable","MIGRATE_DATABASE_URL=postgres://ticket:"+o+"@postgres:5432/ticket?sslmode=disable","REDIS_URL=redis://:"+d+"@redis:6379/0",""].join("\n"))' > $@
 
 # Plain kubectl has no Argo CD sync waves (T3.13), so the order is done by hand: data services ready first, then the
-# migration Job (an Argo CD hook; deleted and created again so each deploy runs it), then the app.
-cluster-deploy: cluster-vault cluster-images
+# migration Job (an Argo CD hook; deleted and created again so each deploy runs it), then the app. The images come
+# first: cluster-vault makes the backup key with the backup image.
+cluster-deploy: cluster-images cluster-vault
 	kubectl $(KCTX) -n ticket-local delete job ticket-migrate --ignore-not-found
 	kubectl $(KCTX) apply -k deploy/overlays/local
 	kubectl $(KCTX) -n ticket-local rollout status statefulset/postgres --timeout=5m
@@ -146,6 +147,7 @@ cluster-deploy: cluster-vault cluster-images
 # Dev sample locations and the dev staff (root, agent, viewer / dev-password) in the cluster's database.
 cluster-seed:
 	kubectl $(KCTX) -n ticket-local exec -i postgres-0 -- psql -U ticket -d ticket -v ON_ERROR_STOP=1 -q < backend/seed/dev.sql
+	docker build -f deploy/backup.Dockerfile -t ticket-backup:local .
 
 # T3.10 checks through the ingress (HTTPS, allow list, per-client login limit, SSE, uploads, /api/track limit, logs).
 cluster-check-ingress:
@@ -167,7 +169,8 @@ ARGOCD_REPO := git@github.com:bell77m/case-ticket-sys.git
 cluster-argocd: deploy/local/argocd-deploy-key
 	helm repo add argo https://argoproj.github.io/argo-helm --force-update
 	helm upgrade --install argocd argo/argo-cd --version $(ARGOCD_CHART_VERSION) \
-		$(HELM_LOCAL) -n argocd -f deploy/platform/argocd-values.yaml --wait
+		$(HELM_LOCAL) -n argocd -f deploy/platform/argocd-values.yaml \
+		$(if $(wildcard deploy/local/argocd-approvers.yaml),-f deploy/local/argocd-approvers.yaml) --wait
 	kubectl $(KCTX) -n argocd create secret generic repo-ticket --from-literal=type=git --from-literal=url=$(ARGOCD_REPO) \
 		--from-file=sshPrivateKey=deploy/local/argocd-deploy-key --dry-run=client -o yaml \
 		| kubectl label --local -f - argocd.argoproj.io/secret-type=repository -o yaml | kubectl $(KCTX) apply --server-side -f -
@@ -177,3 +180,9 @@ cluster-argocd: deploy/local/argocd-deploy-key
 deploy/local/argocd-deploy-key:
 	ssh-keygen -q -t ed25519 -N "" -C "argocd ticket-local (k3d)" -f $@
 	gh repo deploy-key add $@.pub --repo bell77m/case-ticket-sys --title "argocd ticket-local (k3d), read-only"
+# A named account that may sync production (role:prod-approver): make cluster-argocd-approver NAME=alice. Prints a
+# temporary password once (deploy/local/argocd-approver.sh).
+.PHONY: cluster-argocd-approver
+cluster-argocd-approver:
+	bash deploy/local/argocd-approver.sh $(NAME)
+

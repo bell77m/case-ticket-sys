@@ -5,13 +5,16 @@ namespace: ticket-prod
 resources:
   - ../../base
 images:
-  # Set to the release tag vX.Y.Z; both images are built from the same commit and share the tag.
+  # Set to the release tag vX.Y.Z; all three images are built from the same commit and share the tag.
   # Placeholder Harbor host until T3.12 names the project.
   - name: ticket-app
     newName: harbor.example.internal/ticket/ticket-app
     newTag: v0.1.0
   - name: ticket-migrate
     newName: harbor.example.internal/ticket/ticket-migrate
+    newTag: v0.1.0
+  - name: ticket-backup
+    newName: harbor.example.internal/ticket/ticket-backup
     newTag: v0.1.0
 configMapGenerator:
   - name: ticket-app-config

@@ -10,3 +10,12 @@ configs:
   cm:
     # Look at Git every minute (default 3 min), so a digest bump from cd.yml reaches staging quickly.
     timeout.reconciliation: 60s
+  # Everyone who signs in may look; only role:prod-approver may sync production (the manual release approval), and
+  # admin is for setting up only. Approvers are named local accounts, one per person, so Argo CD's log shows who
+  # released: their accounts.<name> and "g, <name>, role:prod-approver" lines come from a second values file
+  # (locally deploy/local/argocd-approvers.yaml, written by make cluster-argocd-approver NAME=...).
+  rbac:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:prod-approver, applications, get, ticket-prod/*, allow
+      p, role:prod-approver, applications, sync, ticket-prod/*, allow

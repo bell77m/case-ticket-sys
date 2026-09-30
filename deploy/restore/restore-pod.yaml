@@ -1,6 +1,7 @@
 # In-place restore helper (T3.16, NFR-8); steps in docs/RESTORE.md. Not part of any overlay: apply it by hand in the
 # namespace being restored, with the image the backup CronJob uses (the runbook's sed sets it), then delete it.
 # It mounts the backup volume read-only and the uploads volume read-write, and connects to PostgreSQL as the owner.
+# The backup's private identity is written into /keys (memory only) through kubectl exec stdin, never into a Secret.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -21,7 +22,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: restore
-      image: postgres:16-alpine
+      image: ticket-backup # deploy/backup.Dockerfile; the runbook's sed sets the CronJob's image
       command: [sleep, "7200"] # stops after two hours if forgotten
       env:
         - name: PGHOST
@@ -53,7 +54,13 @@ spec:
         - name: backups
           mountPath: /backups
           readOnly: true
+        - name: keys
+          mountPath: /keys
   volumes:
+    - name: keys
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Mi
     - name: uploads
       persistentVolumeClaim:
         claimName: ticket-app-uploads

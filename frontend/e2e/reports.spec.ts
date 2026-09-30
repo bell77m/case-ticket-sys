@@ -133,14 +133,41 @@ test('a new date range goes to the URL and reloads the data', async ({ page }) =
 	await expect(page).toHaveURL(new RegExp(`from=${start}`));
 });
 
-test('the Open card opens the queue with the open status filter', async ({ page }) => {
+// FR-P1: every card links to the queue, and a count card's queue holds exactly its number of tickets.
+test('each card opens the queue with exactly its tickets', async ({ page }) => {
+	test.slow(); // seven queue loads
 	await signIn(page, 'root');
 	await expect(page).toHaveURL(/\/staff$/);
 	await page.goto('/staff/reports');
-	await page.getByRole('link', { name: /Open tickets/ }).click();
-	await expect(page).toHaveURL(/\/staff\?status=open$/);
-	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tickets');
-	await expect(page.getByLabel('Status')).toHaveValue('open');
+	const tiles = page.locator('a.tile');
+	await expect(tiles).toHaveCount(7);
+	const cards = [];
+	for (let i = 0; i < 7; i++) {
+		const tile = tiles.nth(i);
+		cards.push({
+			label: await tile.locator('.tile-label').innerText(),
+			value: await tile.locator('.tile-value').innerText(),
+			href: (await tile.getAttribute('href')) ?? ''
+		});
+	}
+	const digits = (s: string) => s.replace(/\D/g, '');
+	for (const c of cards) {
+		const load = page.waitForResponse((r) => r.url().includes('/api/staff/tickets?'));
+		await page.goto(c.href);
+		expect((await load).status(), c.label).toBe(200);
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Tickets');
+		if (!c.label.includes('(median)')) {
+			await expect(page.locator('header .muted'), c.label).toHaveText(new RegExp(`^${digits(c.value)} tickets?$`));
+		}
+	}
+
+	// A period chip says what it filters on and can be removed.
+	await page.goto(cards.find((c) => c.label === 'New')!.href);
+	const chip = page.getByRole('listitem').filter({ hasText: /^Created: / });
+	await expect(chip).toBeVisible();
+	await chip.getByRole('button', { name: /^Remove filter: Created: / }).click();
+	await expect(page).not.toHaveURL(/from=/);
+	await expect(chip).toHaveCount(0);
 });
 
 test('an Agent has no reports; a Viewer does', async ({ page }) => {

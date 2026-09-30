@@ -1,4 +1,4 @@
-import { ApiError, getCategories, getLocations, getReport, type Report } from '$lib/api';
+import { ApiError, getBuildingOptions, getCategories, getReport, type Report } from '$lib/api';
 import { getLocale } from '$lib/paraglide/runtime';
 import type { PageLoad } from './$types';
 
@@ -15,16 +15,13 @@ export const load: PageLoad = async ({ parent, url, depends }) => {
 		const v = url.searchParams.get(key);
 		if (v) api.set(key, v);
 	}
-	// The report filters by English building name; both lists come in English-name order, so they zip by index.
-	const [report, buildingsEn, buildings, categories] = await Promise.all([
+	const [report, buildingOptions, categories] = await Promise.all([
 		getReport(api).catch((err) => {
 			if (err instanceof ApiError && err.code === 'validation') return null;
 			throw err;
 		}),
-		getLocations('en'),
-		lang === 'en' ? null : getLocations(lang),
+		getBuildingOptions(lang),
 		getCategories(lang)
 	]);
-	const buildingOptions = buildingsEn.map((b, i) => ({ value: b.name, label: (buildings ?? buildingsEn)[i]?.name ?? b.name }));
 	return { allowed: true as const, report: report as Report | null, buildingOptions, categories };
 };

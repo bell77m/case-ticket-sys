@@ -6,13 +6,16 @@ resources:
   - ../../base
 images:
   # .github/workflows/cd.yml replaces these after each green CI run on main: newName and the signed image's digest
-  # (both images from the same commit). Interim registry GHCR; Harbor once T3.12 names the project.
+  # (all three images from the same commit). Interim registry GHCR; Harbor once T3.12 names the project.
   - name: ticket-app
     newName: ghcr.io/bell77m/case-ticket-sys/ticket-app
     digest: sha256:c3830d3844f333416bbdbeb6b3e9615499a073e4306b8ee5f311c589dc499577
   - name: ticket-migrate
     newName: ghcr.io/bell77m/case-ticket-sys/ticket-migrate
     digest: sha256:b9d7e806a0dbe06d80ac518eaa61c22ac7af78d536f5480f9efb486ce1f238b5
+  - name: ticket-backup # the tag is replaced by a digest on the first CD run after deploy/backup.Dockerfile landed
+    newName: ghcr.io/bell77m/case-ticket-sys/ticket-backup
+    newTag: pending-first-cd-run
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge

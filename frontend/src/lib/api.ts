@@ -45,6 +45,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export const getLocations = (lang: string) =>
 	call<Building[]>(`/api/locations?lang=${encodeURIComponent(lang)}`);
 
+/** Building filter options (reports, queue): the value is the English name the API filters on, the label the name
+ *  in lang. Both lists come in English-name order, so they zip by index. */
+export async function getBuildingOptions(lang: string) {
+	const [en, local] = await Promise.all([getLocations('en'), lang === 'en' ? null : getLocations(lang)]);
+	return en.map((b, i) => ({ value: b.name, label: (local ?? en)[i]?.name ?? b.name }));
+}
+
 export const createTicket = (t: NewTicket) =>
 	call<CreatedTicket>('/api/tickets', {
 		method: 'POST',

@@ -18,6 +18,7 @@ deploy/overlays/local/secrets.env
 deploy/overlays/local/tls/
 deploy/local/vault-init.json
 deploy/local/argocd-deploy-key*
+deploy/local/argocd-approvers.yaml
 
 # Tool state
 .remember/

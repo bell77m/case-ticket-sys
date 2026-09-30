@@ -46,9 +46,36 @@
 		goto(`?${next}`, { keepFocus: true, noScroll: key !== 'page', replaceState: key !== 'page' });
 	}
 
+	const buildingOptions = $derived([{ value: '', label: m.reports_all_buildings() }, ...data.buildingOptions]);
+	const categoryOptions = $derived([
+		{ value: '', label: m.reports_all_categories() },
+		...data.categories.map((c) => ({ value: String(c.id), label: c.name }))
+	]);
+
 	// Gregorian calendar in every language, including Thai (open question in docs/PLAN.md).
 	const dateFmt = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short', calendar: 'gregory' });
 	const fmt = (iso: string) => dateFmt.format(new Date(iso));
+
+	// Filters a report card adds (FR-P1): a period and an as-of day, shown as chips that can be removed.
+	const dayFmt = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', calendar: 'gregory', timeZone: 'UTC' });
+	const day = (d: string | null) => (d ? dayFmt.format(new Date(`${d}T00:00:00Z`)) : '…');
+	const chips = $derived.by(() => {
+		const out: { label: string; keys: string[] }[] = [];
+		if (params.get('from') || params.get('to')) {
+			const range = `${day(params.get('from'))} – ${day(params.get('to'))}`;
+			out.push({
+				label: params.get('by') === 'resolved' ? m.queue_chip_resolved({ range }) : m.queue_chip_created({ range }),
+				keys: ['by', 'from', 'to']
+			});
+		}
+		if (params.get('as_of')) out.push({ label: m.queue_chip_as_of({ date: day(params.get('as_of')) }), keys: ['as_of'] });
+		return out;
+	});
+	function removeChip(keys: string[]) {
+		const next = new URLSearchParams(page.url.searchParams);
+		for (const k of [...keys, 'page']) next.delete(k);
+		goto(`?${next}`, { keepFocus: true, noScroll: true, replaceState: true });
+	}
 	const place = (t: QueueItem) => `${t.location.building} · ${t.location.floor} · ${t.location.line}`;
 </script>
 
@@ -76,6 +103,30 @@
 		value={params.get('assignee') ?? ''}
 		onchange={(e) => setParam('assignee', e.currentTarget.value)}
 	/>
+	<Select
+		label={m.form_building()}
+		options={buildingOptions}
+		value={params.get('building') ?? ''}
+		onchange={(e) => setParam('building', e.currentTarget.value)}
+	/>
+	<Select
+		label={m.detail_f_category()}
+		options={categoryOptions}
+		value={params.get('category_id') ?? ''}
+		onchange={(e) => setParam('category_id', e.currentTarget.value)}
+	/>
+	{#if chips.length}
+		<ul class="chips">
+			{#each chips as c (c.label)}
+				<li>
+					<span>{c.label}</span>
+					<button type="button" aria-label={m.queue_chip_remove({ filter: c.label })} onclick={() => removeChip(c.keys)}>
+						<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 	<form
 		class="search"
 		role="search"
@@ -177,6 +228,48 @@
 	}
 	.search {
 		grid-column: 1 / -1;
+	}
+	/* Report-card filters (FR-P1): pills like the badges, each with a round remove button (24px target, WCAG 2.2). */
+	.chips {
+		grid-column: 1 / -1;
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-xs);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.chips li {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-xxs);
+		padding: var(--space-xxs) var(--space-xxs) var(--space-xxs) var(--space-sm);
+		border-radius: var(--radius-pill);
+		background: var(--color-surface-card);
+		font: var(--font-body-sm);
+		color: var(--color-ink);
+	}
+	.chips button {
+		display: inline-grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-full);
+		background: transparent;
+		color: var(--color-body);
+		cursor: pointer;
+	}
+	.chips button:hover {
+		background: var(--color-surface-strong);
+	}
+	.chips svg {
+		width: 12px;
+		height: 12px;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		fill: none;
 	}
 	.search .row {
 		display: flex;

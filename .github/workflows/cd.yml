@@ -1,4 +1,4 @@
-# CD (T3.15, interim): after CI passes on a push to main, build the app and migration images, scan them, push them
+# CD (T3.15, interim): after CI passes on a push to main, build the app, migration and backup images, scan them, push them
 # to GHCR, sign them and point the staging overlay at the new digests. Argo CD (T3.14) syncs staging from there.
 # Interim until the platform exists: GHCR instead of Harbor (T3.12: change REGISTRY and the login), keyless Cosign
 # with GitHub's OIDC identity, the GitHub token instead of Vault JWT auth (T3.11), no ZAP scan until staging is up.
@@ -44,18 +44,20 @@ jobs:
           {
             echo "APP=${base}/ticket-app"
             echo "MIGRATE=${base}/ticket-migrate"
+            echo "BACKUP=${base}/ticket-backup"
             echo "TAG=sha-${SHA::12}"
           } >> "$GITHUB_ENV"
 
-      - name: Build both images from this commit
+      - name: Build the images from this commit
         run: |
           docker build -t "$APP:$TAG" .
           docker build -f deploy/migrate.Dockerfile -t "$MIGRATE:$TAG" .
+          docker build -f deploy/backup.Dockerfile -t "$BACKUP:$TAG" .
 
       # Before pushing: a HIGH or CRITICAL finding with a fix available stops the release.
       - name: Trivy image scan
         run: |
-          for img in "$APP:$TAG" "$MIGRATE:$TAG"; do
+          for img in "$APP:$TAG" "$MIGRATE:$TAG" "$BACKUP:$TAG"; do
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.58.1 \
               image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$img"
           done
@@ -70,8 +72,12 @@ jobs:
         run: |
           docker push "$APP:$TAG"
           docker push "$MIGRATE:$TAG"
-          echo "APP_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$APP:$TAG")" >> "$GITHUB_ENV"
-          echo "MIGRATE_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$MIGRATE:$TAG")" >> "$GITHUB_ENV"
+          docker push "$BACKUP:$TAG"
+          {
+            echo "APP_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$APP:$TAG")"
+            echo "MIGRATE_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$MIGRATE:$TAG")"
+            echo "BACKUP_REF=$(docker inspect --format '{{index .RepoDigests 0}}' "$BACKUP:$TAG")"
+          } >> "$GITHUB_ENV"
 
       - uses: anchore/sbom-action@v0
         with:
@@ -85,6 +91,12 @@ jobs:
           format: spdx-json
           output-file: sbom-migrate.spdx.json
           upload-artifact: false
+      - uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.BACKUP_REF }}
+          format: spdx-json
+          output-file: sbom-backup.spdx.json
+          upload-artifact: false
 
       # Keyless: the signature names this repository's workflow as the signer (for Kyverno, T3.12).
       - uses: sigstore/cosign-installer@v3
@@ -92,8 +104,10 @@ jobs:
         run: |
           cosign sign --yes "$APP_REF"
           cosign sign --yes "$MIGRATE_REF"
+          cosign sign --yes "$BACKUP_REF"
           cosign attest --yes --type spdxjson --predicate sbom-app.spdx.json "$APP_REF"
           cosign attest --yes --type spdxjson --predicate sbom-migrate.spdx.json "$MIGRATE_REF"
+          cosign attest --yes --type spdxjson --predicate sbom-backup.spdx.json "$BACKUP_REF"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -109,6 +123,7 @@ jobs:
           git checkout -B release origin/main
           yq -i '(.images[] | select(.name == "ticket-app")) |= (.newName = (env(APP_REF) | split("@") | .[0]) | .digest = (env(APP_REF) | split("@") | .[1]) | del(.newTag))' deploy/overlays/staging/kustomization.yaml
           yq -i '(.images[] | select(.name == "ticket-migrate")) |= (.newName = (env(MIGRATE_REF) | split("@") | .[0]) | .digest = (env(MIGRATE_REF) | split("@") | .[1]) | del(.newTag))' deploy/overlays/staging/kustomization.yaml
+          yq -i '(.images[] | select(.name == "ticket-backup")) |= (.newName = (env(BACKUP_REF) | split("@") | .[0]) | .digest = (env(BACKUP_REF) | split("@") | .[1]) | del(.newTag))' deploy/overlays/staging/kustomization.yaml
           if git diff --quiet; then echo "staging already runs these images"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

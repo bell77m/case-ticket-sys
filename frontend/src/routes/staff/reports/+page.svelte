@@ -49,6 +49,16 @@
 
 	const graphs = $derived(report ? reportGraphs(report, { building, floor, open: drillTo }) : []);
 
+	// The filters every card link carries to the queue, with the time zone the report used (FR-P1).
+	const cardScope = $derived.by(() => {
+		const p = new URLSearchParams({ tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+		for (const key of ['building', 'category_id']) {
+			const v = page.url.searchParams.get(key);
+			if (v) p.set(key, v);
+		}
+		return p.toString();
+	});
+
 	// Export PDF (FR-P4): the view on show, in the viewer's language (FR-I6). Gotenberg takes a few seconds.
 	let exporting = $state(false);
 	let exportError = $state('');
@@ -141,7 +151,7 @@
 		<Alert variant="error">{m.reports_err_range()}</Alert>
 	{:else}
 		<div class={['content', busy && 'busy']} aria-busy={busy}>
-			<ReportCards {report} />
+			<ReportCards {report} scope={cardScope} />
 
 			<WrittenSummary {report} />
 

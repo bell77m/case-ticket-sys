@@ -8,12 +8,12 @@ The CronJob `ticket-backup` (`deploy/base/backup.yaml`) runs every night at 02:0
 
 ```
 /backups/2026-09-29T020000Z/
-  ticket.dump     pg_dump of database "ticket", custom format (pg_restore reads it)
-  uploads.tar     every evidence photo and video, paths relative to UPLOAD_DIR
-  SHA256SUMS      checksums of both files
+  ticket.dump.age   pg_dump of database "ticket", custom format, encrypted with age
+  uploads.tar.age   tar of every evidence photo and video (paths relative to UPLOAD_DIR), encrypted with age
+  SHA256SUMS        checksums of both files
 ```
 
-- The files are readable only by user 65532 (the app's user). They are not encrypted, so the NFS share must be exported only to the cluster node's IP, with `root_squash`, and no other host may mount it.
+- Both files are encrypted with [age](https://age-encryption.org) to the environment's backup key (see "The backup key" below), and readable only by user 65532 (the app's user). Still export the NFS share only to the cluster node's IP, with `root_squash`.
 - A run that fails leaves a folder ending in `.partial`. Never restore from one.
 - Folders older than 14 days are deleted (`BACKUP_KEEP_DAYS` in the CronJob).
 - Worst case, a restore loses the last 24 hours of tickets.
@@ -22,6 +22,24 @@ Not backed up, on purpose:
 - **Redis.** It holds only sessions, rate-limit counters and live-update messages. After a restore, staff sign in again.
 - **Kubernetes objects.** They are in Git (`deploy/`), and Argo CD recreates them.
 - **Vault.** Vault has its own snapshot procedure; see Follow-ups in docs/notes/T3.16.md.
+
+## The backup key
+
+One age key pair per environment. The cluster only ever holds the public half.
+- **Public recipient** (`age1…`): the key `BACKUP_AGE_RECIPIENT` in `secret/ticket/<env>/app`, which VSO delivers to the CronJob with the other app secrets.
+- **Private identity** (`AGE-SECRET-KEY-1…`): `secret/backup/<env>` in Vault (fields `identity` and `recipient`). This is outside the app's policy path, so only an admin token can read it. There is also one offline copy (see below). Without the identity, no backup can be read.
+
+Make it once per environment, on an admin machine with Docker and a Vault admin login:
+
+```sh
+docker run --rm ticket-backup:<tag> age-keygen            # prints the identity; its public key is in the comment line
+vault kv put -cas=0 secret/backup/prod identity=- recipient=age1…   # paste the identity on stdin; -cas=0 never overwrites
+vault kv patch secret/ticket/prod/app BACKUP_AGE_RECIPIENT=age1…
+```
+
+Write the identity on paper or in the password manager's offline vault, and keep it in the safe with the Vault unseal keys, then clear the terminal. Locally, `make cluster-vault` does all of this (deploy/local/vault-setup.sh), without printing the identity.
+
+A new key does not re-encrypt old sets: keep the old identity until its last set is older than 14 days.
 
 Check that last night's backup ran:
 
@@ -40,6 +58,7 @@ Restore the newest backup into a scratch namespace, then compare it with the liv
 
 The test passes when:
 - the checksums match;
+- both files start with the age header, and a different key cannot decrypt them;
 - the counts of tickets, attachments and comments, and the last audit_log id, equal the live database at backup time;
 - every attachment row has its file, with the recorded size;
 - the evidence files have the same SHA-256 as the live ones;
@@ -66,7 +85,7 @@ Set the namespace first: `NS=ticket-prod` (or `ticket-staging`). Commands run fr
 4. **Start the restore pod** with the image the CronJob uses:
    ```sh
    IMG=$(kubectl -n $NS get cronjob ticket-backup -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}')
-   sed "s|image: postgres:16-alpine|image: $IMG|" deploy/restore/restore-pod.yaml | kubectl -n $NS apply -f -
+   sed "s|image: ticket-backup|image: $IMG|" deploy/restore/restore-pod.yaml | kubectl -n $NS apply -f -
    kubectl -n $NS wait --for=condition=ready pod/ticket-restore
    ```
 
@@ -76,20 +95,27 @@ Set the namespace first: `NS=ticket-prod` (or `ticket-staging`). Commands run fr
    SET=/backups/<folder>
    kubectl -n $NS exec ticket-restore -- sh -c "cd $SET && sha256sum -c SHA256SUMS"
    ```
+   Then give the pod the private identity. It goes into a memory-only folder and is gone with the pod. It never goes into a Secret or onto a command line:
+   ```sh
+   IDENTITY=$(vault kv get -field=identity secret/backup/prod)     # your admin login; staging: secret/backup/staging
+   printf '%s
+' "$IDENTITY" | kubectl -n $NS exec -i ticket-restore -- sh -c 'umask 077; cat > /keys/identity'
+   unset IDENTITY
+   ```
 
 6. **Restore the database.** This runs as the owner `ticket`. `--clean` drops each object before it is recreated, so the database ends up exactly as in the backup, audit_log included.
    ```sh
-   kubectl -n $NS exec ticket-restore -- pg_restore --clean --if-exists --exit-on-error -d ticket $SET/ticket.dump
+   kubectl -n $NS exec ticket-restore -- sh -c "set -o pipefail; age -d -i /keys/identity $SET/ticket.dump.age | pg_restore --clean --if-exists --exit-on-error -d ticket"
    ```
 
 7. **Restore the evidence files.** Files in the backup are written back. A file uploaded after the backup stays on disk, but no ticket points to it.
    ```sh
-   kubectl -n $NS exec ticket-restore -- tar -xf $SET/uploads.tar -C /data/uploads
+   kubectl -n $NS exec ticket-restore -- sh -c "set -o pipefail; age -d -i /keys/identity $SET/uploads.tar.age | tar -xf - -C /data/uploads"
    ```
 
 8. **Start again and clean up.**
    ```sh
-   kubectl -n $NS delete pod ticket-restore
+   kubectl -n $NS delete pod ticket-restore            # also removes the identity (memory-only folder)
    kubectl -n $NS scale deploy/ticket-app --replicas=2
    kubectl -n $NS rollout status deploy/ticket-app
    kubectl -n $NS patch cronjob ticket-backup -p '{"spec":{"suspend":false}}'

@@ -60,8 +60,36 @@ printf 'path "secret/data/ticket/%s/*" {\n  capabilities = ["read"]\n}\n' "$env"
 v write "auth/kubernetes/role/ticket-$env" bound_service_account_names=ticket-app-vault \
 	bound_service_account_namespaces="$ns" policies="ticket-$env" audience=vault ttl=1h </dev/null >/dev/null
 
-# The values: app secrets from secrets.env, the certificate from tls/ (written as KV v2 JSON bodies on stdin).
-node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").split(/\r?\n/).filter(Boolean);const d={};for(const x of l){const i=x.indexOf("=");d[x.slice(0,i)]=x.slice(i+1)}process.stdout.write(JSON.stringify({data:d}))' "$secrets" |
+# T3.16: backups are encrypted with age. The private identity is kept only at secret/backup/<env>, outside the
+# path the app's policy may read (a restore reads it with an admin token); its public recipient goes into the app
+# secret for the backup CronJob. Made once with age-keygen from the backup image (make cluster-images builds it).
+# Only a real "not there yet" makes a key: any other failure stops here, because a new key would leave every backup
+# made with the old one unreadable. The write below also refuses to replace an existing entry (cas=0).
+rc=0
+current=$(v kv get -format=json "secret/backup/$env" </dev/null 2>&1) || rc=$?
+if [ "$rc" = 0 ]; then
+	recipient=$(echo "$current" | field data.data.recipient)
+	case "$recipient" in age1*) ;; *) echo "secret/backup/$env has no age recipient; fix it by hand" >&2; exit 1 ;; esac
+elif printf '%s' "$current" | grep -q 'No value found at'; then
+	recipient=
+else
+	echo "reading secret/backup/$env failed (exit $rc); not making a new backup key" >&2
+	exit 1
+fi
+if [ -z "$recipient" ]; then
+	echo "creating the backup key (age) at secret/backup/$env"
+	identity=$(docker run --rm ticket-backup:local age-keygen 2>/dev/null | grep '^AGE-SECRET-KEY-') ||
+		{ echo "no ticket-backup:local image to make the backup key: run make cluster-images first" >&2; exit 1; }
+	recipient=$(printf '%s\n' "$identity" | docker run --rm -i ticket-backup:local age-keygen -y)
+	case "$recipient" in age1*) ;; *) echo "age-keygen -y gave no recipient" >&2; exit 1 ;; esac
+	printf '{"options":{"cas":0},"data":{"identity":"%s","recipient":"%s"}}' "$identity" "$recipient" |
+		v write "secret/data/backup/$env" - >/dev/null
+	unset identity
+fi
+
+# The values: app secrets from secrets.env plus the backup recipient, the certificate from tls/ (written as KV v2
+# JSON bodies on stdin).
+BACKUP_AGE_RECIPIENT="$recipient" node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").split(/\r?\n/).filter(Boolean);const d={};for(const x of l){const i=x.indexOf("=");d[x.slice(0,i)]=x.slice(i+1)}d.BACKUP_AGE_RECIPIENT=process.env.BACKUP_AGE_RECIPIENT;process.stdout.write(JSON.stringify({data:d}))' "$secrets" |
 	v write "secret/data/ticket/$env/app" - >/dev/null
 node -e 'const f=require("fs");process.stdout.write(JSON.stringify({data:{"tls.crt":f.readFileSync(process.argv[1],"utf8"),"tls.key":f.readFileSync(process.argv[2],"utf8")}}))' "$tls/tls.crt" "$tls/tls.key" |
 	v write "secret/data/ticket/$env/tls" - >/dev/null

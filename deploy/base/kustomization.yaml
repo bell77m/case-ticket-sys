@@ -9,6 +9,8 @@
 #   POSTGRES_PASSWORD       password of the owner role "ticket"                              (PostgreSQL)
 #   TICKET_APP_DB_PASSWORD  password of ticket_app, set once when the volume is initialized  (PostgreSQL)
 #   REDIS_PASSWORD          (Redis)
+#   BACKUP_AGE_RECIPIENT    age1... public key the nightly backup encrypts to (backup.yaml); its private identity
+#                           is kept apart, at secret/backup/<env> in Vault (docs/RESTORE.md)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
