@@ -20,10 +20,17 @@ export default defineConfig({
 			// index.html. The Go server's header (securityHeaders in main.go) keeps frame-ancestors, object-src, base-uri
 			// and form-action. Vite adds 'unsafe-inline' to style-src in dev only. The one inline style allowed is SvelteKit's
 			// route announcer (visually hidden; blocked, it shows on screen): its exact value, by hash. A SvelteKit update
-			// that changes it fails e2e/smoke.spec.ts against the built app, which prints the new hash.
+			// that changes it fails e2e/smoke.spec.ts against the built app, which prints the new hash. default-src 'self'
+			// covers fetch/EventSource and frames. img-src needs data: for the tracking QR code and blob: for upload
+			// previews and guest evidence (fetched with the token header); media-src needs blob: for guest evidence videos;
+			// font-src needs data: because Vite inlines font files under 4 KB into the CSS.
 			csp: {
 				mode: 'hash',
 				directives: {
+					'default-src': ['self'],
+					'img-src': ['self', 'data:', 'blob:'],
+					'media-src': ['self', 'blob:'],
+					'font-src': ['self', 'data:'],
 					'script-src': ['self'],
 					'style-src': ['self', 'unsafe-hashes', 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo=']
 				}

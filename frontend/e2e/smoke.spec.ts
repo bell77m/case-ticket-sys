@@ -11,6 +11,7 @@ const locales = ['en', 'zh-CN', 'my', 'th'];
 const messages = Object.fromEntries(locales.map((l) => [l, JSON.parse(readFileSync(`messages/${l}.json`, 'utf8'))]));
 
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), Buffer.from('JFIF'), Buffer.alloc(2000, 1)]);
+const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(3000, 2)]);
 
 /** Collects the browser's CSP refusals ("Refused to execute inline script ...") into errors. */
 function cspErrors(page: Page, errors: string[] = []) {
@@ -44,11 +45,15 @@ for (const locale of locales) {
 		await page.getByLabel(t('form_floor')).selectOption({ index: 1 });
 		await page.getByLabel(t('form_line')).selectOption({ index: 1 });
 		await page.getByLabel(t('form_details')).fill(`Smoke test ${locale} ${Date.now()}: the label printer is jammed.`);
-		await page.getByLabel(t('form_evidence')).setInputFiles({ name: 'printer.jpg', mimeType: 'image/jpeg', buffer: jpeg });
+		// A photo and a video: previews (blob:) on the form, and both evidence kinds (blob:) on the tracking page.
+		await page.getByLabel(t('form_evidence')).setInputFiles([
+			{ name: 'printer.jpg', mimeType: 'image/jpeg', buffer: jpeg },
+			{ name: 'printer.mp4', mimeType: 'video/mp4', buffer: mp4 }
+		]);
 		await page.getByRole('button', { name: t('form_submit') }).click();
 		const created = page.getByRole('heading', { name: new RegExp(esc(t('form_created')).replace('{id}', '(\\d+)')) });
 		await expect(created).toBeVisible();
-		await expect(page.getByText(t('form_file_attached_one'))).toBeVisible();
+		await expect(page.getByText(t('form_files_attached').replace('{count}', '2'))).toBeVisible();
 		const id = (await created.textContent())!.match(/#(\d+)/)![1];
 		const trackURL = await page.getByLabel(t('track_link_label')).inputValue();
 
@@ -102,8 +107,15 @@ for (const locale of locales) {
 		// The dashboard counts it without a page reload (T3.04).
 		await expect(resolved).toHaveText(/^[1၁]$/, { timeout: 10_000 });
 
-		// Guest: confirms the fix on the tracking link; the ticket closes.
+		// Guest: opens both files of evidence (fetched with the token, shown from blob: URLs), then confirms the fix on the
+		// tracking link; the ticket closes.
 		await page.goto(trackURL);
+		const views = page.locator('ul.files').getByRole('button');
+		for (const left of [1, 0]) {
+			await views.first().click();
+			await expect(views).toHaveCount(left);
+		}
+		await expect(page.locator('ul.files img[src^="blob:"], ul.files video[src^="blob:"]')).toHaveCount(2);
 		await page.getByRole('button', { name: t('track_confirm') }).click();
 		await expect(page.getByText(t('track_closed'))).toBeVisible();
 
@@ -113,13 +125,13 @@ for (const locale of locales) {
 	});
 }
 
-// T2.14: the CSP names script-src and style-src, and no page the smoke flow skips is refused anything under it.
-test('every page loads under the script and style CSP', async ({ page, request }) => {
+// T2.14, T3.17: the CSP sets default-src, script-src and style-src, and no page the smoke flow skips is refused anything.
+test('every page loads under the CSP', async ({ page, request }) => {
 	const errors = cspErrors(page);
 	const res = await page.goto('/');
 	const csp = await policy(page, res);
-	expect(csp).toMatch(/script-src 'self'/);
-	expect(csp).toMatch(/style-src 'self'/);
+	// default-src covers what script-src and style-src do not (fetch, images, media, fonts, frames): 'self' only.
+	for (const directive of ["default-src 'self'", "script-src 'self'", "style-src 'self'"]) expect(csp).toContain(directive);
 	await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
 	const { id, token } = await guestTicket(request, `CSP check ${Date.now()}: the monitor is blank.`);
