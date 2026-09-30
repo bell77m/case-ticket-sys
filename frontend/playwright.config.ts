@@ -22,7 +22,13 @@ export default defineConfig({
 	// The first page load after starting Vite compiles dependencies and can take several seconds.
 	expect: { timeout: 10_000 },
 	// Reduced motion: no entrance animations, so axe and screenshots see finished pages.
-	use: { baseURL: external ?? 'http://localhost:5173', channel: 'msedge', contextOptions: { reducedMotion: 'reduce' } },
+	use: {
+		baseURL: external ?? 'http://localhost:5173',
+		channel: 'msedge',
+		contextOptions: { reducedMotion: 'reduce' },
+		// The local k3d cluster (cd-local.yml, T3.17) serves HTTPS with a throwaway CA the browser does not know.
+		ignoreHTTPSErrors: external?.startsWith('https://') ?? false
+	},
 	projects: [{ name: 'phone', use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: false } }],
 	webServer: external ? [] : [
 		// e2e opens about 14 tickets per run from localhost, over the guest limit of 5 per 10 minutes (NFR-3).

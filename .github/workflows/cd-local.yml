@@ -24,7 +24,7 @@ jobs:
     name: Build, sign, deploy to the local cluster, ZAP
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: [self-hosted, ticket-local]
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: write # commit the digests to deploy/overlays/local
       id-token: write # the OIDC token Vault checks
@@ -55,10 +55,29 @@ jobs:
           exit 1
 
       # ponytail: a fixed wait for Argo CD (60 s polling) and the rollout; poll Argo CD's API once CI has a login there.
-      - name: ZAP baseline scan of the deployed app
+      - name: Wait for Argo CD to roll out
+        run: sleep 150
+
+      # T3.17: the ticket's whole life in all 4 languages, through the ingress, as a guest and as staff. The dev staff
+      # come from make cluster-seed; a real staging cluster has its own test accounts (E2E_PASSWORD from Vault).
+      - name: Smoke suite against the deployed app (4 languages)
+        working-directory: frontend
+        env:
+          E2E_BASE_URL: https://tickets.localtest.me:8443
         run: |
-          sleep 150
-          bash deploy/local/zap-baseline.sh "$RUNNER_TEMP/zap.json"
+          npm ci --no-audit --no-fund
+          npx playwright test e2e/smoke.spec.ts --workers=1
+
+      - name: ZAP baseline scan of the deployed app
+        run: bash deploy/local/zap-baseline.sh "$RUNNER_TEMP/zap.json"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-${{ github.event.workflow_run.head_sha }}
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 14
 
       - uses: actions/upload-artifact@v4
         if: always()

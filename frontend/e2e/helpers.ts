@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 /** Where the app under test runs: Vite locally, the Go binary with the built SPA in CI (playwright.config.ts). */
 export const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 
-/** The password `make seed` gives the dev staff root, agent and viewer. */
-export const devPassword = 'dev-password';
+/** The password `make seed` (and `make cluster-seed`) gives the dev staff root, agent and viewer. A real staging
+ *  cluster has its own test accounts: CI passes their password in E2E_PASSWORD, read from Vault, never from Git. */
+export const devPassword = process.env.E2E_PASSWORD ?? 'dev-password';
 
 /** Signs in on /login and waits for the API's answer, so a following page.goto cannot cancel it. Dev staff come from `make seed`. */
 export async function signIn(page: Page, username: string, password = devPassword) {
