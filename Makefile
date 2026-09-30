@@ -157,6 +157,14 @@ cluster-check-ingress:
 cluster-restore-test:
 	bash deploy/local/restore-test.sh
 
+# Vault's nightly Raft snapshot (deploy/platform/vault-backup.yaml; its policy and role come from cluster-vault), and
+# its restore test: snapshot now, restore into a throwaway Vault, unseal with the real keys, compare.
+.PHONY: cluster-vault-backup cluster-vault-restore-test
+cluster-vault-backup: cluster-vault
+	kubectl $(KCTX) apply -f deploy/platform/vault-backup.yaml
+cluster-vault-restore-test:
+	bash deploy/local/vault-restore-test.sh
+
 cluster-down:
 	k3d cluster delete ticket-local
 

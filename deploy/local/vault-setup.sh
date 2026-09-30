@@ -60,6 +60,11 @@ printf 'path "secret/data/ticket/%s/*" {\n  capabilities = ["read"]\n}\n' "$env"
 v write "auth/kubernetes/role/ticket-$env" bound_service_account_names=ticket-app-vault \
 	bound_service_account_namespaces="$ns" policies="ticket-$env" audience=vault ttl=1h </dev/null >/dev/null
 
+# Vault's own backup (deploy/platform/vault-backup.yaml): its ServiceAccount may take a Raft snapshot, nothing else.
+printf 'path "sys/storage/raft/snapshot" {\n  capabilities = ["read"]\n}\n' | v policy write vault-backup - >/dev/null
+v write auth/kubernetes/role/vault-backup bound_service_account_names=vault-backup \
+	bound_service_account_namespaces=vault policies=vault-backup audience=vault ttl=15m </dev/null >/dev/null
+
 # T3.16: backups are encrypted with age. The private identity is kept only at secret/backup/<env>, outside the
 # path the app's policy may read (a restore reads it with an admin token); its public recipient goes into the app
 # secret for the backup CronJob. Made once with age-keygen from the backup image (make cluster-images builds it).

@@ -21,7 +21,7 @@ The CronJob `ticket-backup` (`deploy/base/backup.yaml`) runs every night at 02:0
 Not backed up, on purpose:
 - **Redis.** It holds only sessions, rate-limit counters and live-update messages. After a restore, staff sign in again.
 - **Kubernetes objects.** They are in Git (`deploy/`), and Argo CD recreates them.
-- **Vault.** Vault has its own snapshot procedure; see Follow-ups in docs/notes/T3.16.md.
+- **Vault** is backed up separately, by its own snapshot (see "Vault" at the end).
 
 ## The backup key
 
@@ -129,3 +129,23 @@ Set the namespace first: `NS=ticket-prod` (or `ticket-staging`). Commands run fr
    - The newest ticket number is from just before the backup time.
    - Tell staff that changes made after the backup time are gone: tickets, replies and status changes.
    - Record the restore in the ops change log: time, backup folder and who ran it. `audit_log` itself went back to the backup's state, so it cannot record the restore.
+
+## Vault
+
+The CronJob `vault-backup` (`deploy/platform/vault-backup.yaml`, namespace `vault`) takes a Raft snapshot of all of Vault every night at 02:30. That covers every secret, the policies, the auth roles, the backup key and the Cosign key.
+- It writes `vault-<time>.snap` (0600) to the volume `vault-backups`, which on the host is the NFS share, and keeps 14 days.
+- It signs in with its own Kubernetes auth role `vault-backup`, whose policy may only read `sys/storage/raft/snapshot`, and revokes its token at the end.
+- A snapshot is still encrypted by Vault's barrier: it opens only with 3 of the 5 unseal keys. Without the unseal keys it is useless, and so are the app backups (their key is inside it).
+
+Restore test (monthly, with the app's): `make cluster-vault-restore-test` locally (`deploy/local/vault-restore-test.sh`). The live Vault is not touched. The test:
+- takes a snapshot now;
+- restores it into a throwaway Vault in namespace `vault`;
+- unseals that Vault with the live keys;
+- compares the secrets (as hashes), the policies and the auth roles with the live Vault.
+
+Full restore (Vault's data lost):
+1. Install Vault as usual (`deploy/platform/vault-values.yaml`, with its audit volume: the restored settings turn the file audit device back on, and Vault stays standby if it cannot write `/vault/audit/audit.log`). Initialise it with 1 key share, unseal it with that key, and keep its temporary root token.
+2. Copy the newest snapshot into the pod, or mount the share, then:
+   `vault operator raft snapshot restore -force /path/vault-<time>.snap` (with the temporary root token on stdin as `VAULT_TOKEN`, never as an argument).
+3. Restart Vault (`kubectl -n vault delete pod vault-0`). It comes back sealed with the old settings: unseal it with 3 of the original 5 keys. The temporary key and root token are gone with the old data.
+4. VSO reconnects by itself; check that `ticket-app-secrets` and `ticket-app-tls` are synced (`kubectl get vaultstaticsecret -A`).
