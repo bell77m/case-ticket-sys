@@ -273,10 +273,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Staging auto-sync, production manual sync.
     - Done when: a tag change in the GitOps repo rolls out to staging with no downtime.
     - Status: done. Argo CD v3.5.3 with per-environment AppProjects (prod manual only, enforced by a deny sync window) pulls this repo's overlays through a read-only deploy key; on the local k3d cluster a tag change on a branch rolled out with 198 of 198 `/healthz` checks answering 200. Still to do on the T3.09 host: install and apply `deploy/argocd`, and named accounts for prod approvers. See [note](notes/T3.14.md).
-- [ ] **T3.15** CI pipeline, part 2 — M · deps: T1.21, T3.12, T3.14 · ops
+- [x] **T3.15** CI pipeline, part 2 — M · deps: T1.21, T3.12, T3.14 · ops
     - Build, Syft SBOM, Trivy image scan, Cosign sign, push to Harbor, update GitOps tag, ZAP baseline on staging; CI secrets from Vault JWT auth.
     - Done when: a merge to main reaches staging with no manual step.
-    - Status: interim pipeline built (2026-09-28): .github/workflows/cd.yml builds, scans, pushes to GHCR, signs keyless and commits the staging digests after each green CI run on main. Still to do once the platform exists: Harbor instead of GHCR (T3.12), Vault JWT instead of the GitHub token (T3.11), ZAP baseline on staging. Argo CD (T3.14) picks up the digest commit. See [note](notes/2026-09-28-ci-cd.md).
+    - Status: done. On the local cluster (staging stand-in), cd-local.yml on a self-hosted runner builds, Trivy-scans, pushes to Harbor, signs and attests with the Vault transit key through Vault JWT auth (no stored secret), pins the digests for Argo CD and runs a ZAP baseline; merge to running signed pods with no manual step. cd.yml (GHCR, staging digests) stays until T3.09. See [note](notes/T3.15.md).
 - [x] **T3.16** Backups and restore test — M · deps: T3.13 · ops · NFR-8
     - Nightly CronJob: pg_dump and uploads to NFS; documented restore steps.
     - Done when: a restore into a scratch namespace brings back tickets and evidence.

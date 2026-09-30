@@ -11,7 +11,7 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 chmod 777 "$out" # the ZAP image runs as user zap and writes its report here
 docker run --rm --network k3d-ticket-local --add-host "tickets.localtest.me:$lb" \
-	-v "$(cygpath -m "$out" 2>/dev/null || echo "$out"):/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+	-v "$(cygpath -m "$out" 2>/dev/null || echo "$out"):/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef \
 	zap-baseline.py -t https://tickets.localtest.me/ -m 2 -J zap.json -I >/dev/null || true
 [ -s "$out/zap.json" ] || { echo "ZAP wrote no report" >&2; exit 1; }
 [ -z "$report" ] || cp "$out/zap.json" "$report"

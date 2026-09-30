@@ -16,7 +16,7 @@ mode=${1:?usage: cd-local.sh build|pin <refs-file>} refs_file=${2:?usage: cd-loc
 
 if [ "$mode" = pin ]; then
 	while IFS='=' read -r name ref; do
-		REF=$ref docker run --rm -e REF -v "$(pwd -W 2>/dev/null || pwd):/workdir" mikefarah/yq:4 -i 			"(.images[] | select(.name == \"$name\")) |= (.newName = (env(REF) | split(\"@\") | .[0]) | .digest = (env(REF) | split(\"@\") | .[1]) | del(.newTag))" 			deploy/overlays/local/kustomization.yaml
+		REF=$ref docker run --rm -e REF -v "$(pwd -W 2>/dev/null || pwd):/workdir" mikefarah/yq:4@sha256:cfc4eee658595834ef304eadb0c3ea721f3b7cb6404ad8b7cb909cc5b5145b23 -i 			"(.images[] | select(.name == \"$name\")) |= (.newName = (env(REF) | split(\"@\") | .[0]) | .digest = (env(REF) | split(\"@\") | .[1]) | del(.newTag))" 			deploy/overlays/local/kustomization.yaml
 	done <"$refs_file"
 	exit 0
 fi
@@ -24,11 +24,13 @@ fi
 : "${ACTIONS_ID_TOKEN_REQUEST_URL:?needs permissions: id-token: write}" "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?}"
 harbor=harbor.localtest.me
 tag=sha-${SHA:0:12}
-vault_img=hashicorp/vault:2.0.4
-crane_img=gcr.io/go-containerregistry/crane:debug
-cosign_img=ghcr.io/sigstore/cosign/cosign:v2.6.5 # the version Kyverno's check was proven with (classic .sig tags)
-syft_img=anchore/syft:v1.33.0
-trivy_img=ghcr.io/aquasecurity/trivy:0.58.1
+# Tool images by digest (the tag is for people): a moved tag cannot change what builds, scans or signs. To update one,
+# docker pull the new tag and copy its digest from docker image inspect.
+vault_img=hashicorp/vault:2.0.4@sha256:5be49781ecf78bfe775c5309c6a4d9f4e9e040b6c885c99eb2b12fb69855e1a2
+crane_img=gcr.io/go-containerregistry/crane:debug@sha256:e78770b31258a3846f878036d9c1f63fbe4c871f9f56990bf77fd95c013e3c1b
+cosign_img=ghcr.io/sigstore/cosign/cosign:v2.6.5@sha256:ad281047f85c5e1fc6ffbc30c2b55be3b07b4032bef715a12122ce5829619aca # the version Kyverno's check was proven with (classic .sig tags)
+syft_img=anchore/syft:v1.33.0@sha256:f94e5d9fce1f2278491a8e3a63bd5f6ddb81fdfdbb8bf7a1637565c1d5344357
+trivy_img=ghcr.io/aquasecurity/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
 win() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 work=$(mktemp -d)
 cp "$TICKET_LOCAL_CA" "$work/ca.crt"

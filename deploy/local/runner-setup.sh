@@ -13,8 +13,13 @@ mkdir -p "$dir"
 if [ ! -e "$dir/config.cmd" ]; then
 	ver=$(gh api repos/actions/runner/releases/latest --jq .tag_name)
 	ver=${ver#v}
+	zip=actions-runner-win-x64-$ver.zip
 	echo "downloading actions/runner $ver"
-	curl -sSfL -o "$dir/runner.zip" "https://github.com/actions/runner/releases/download/v$ver/actions-runner-win-x64-$ver.zip"
+	curl -sSfL -o "$dir/runner.zip" "https://github.com/actions/runner/releases/download/v$ver/$zip"
+	# Extract only what GitHub published: the release asset's SHA-256 must match the download.
+	want=$(gh api repos/actions/runner/releases/latest --jq ".assets[] | select(.name == \"$zip\") | .digest")
+	got=sha256:$(sha256sum "$dir/runner.zip" | cut -d' ' -f1)
+	[ -n "$want" ] && [ "$got" = "$want" ] || { echo "runner zip checksum mismatch: got $got, want $want" >&2; rm -f "$dir/runner.zip"; exit 1; }
 	powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dir/runner.zip")' -DestinationPath '$(cygpath -w "$dir")' -Force"
 	rm -f "$dir/runner.zip"
 fi
