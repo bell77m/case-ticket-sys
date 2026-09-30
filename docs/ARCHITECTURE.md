@@ -74,7 +74,15 @@ flowchart LR
 
 GitHub Actions checks every pull request and push (.github/workflows/ci.yml); after CI passes on `main`, .github/workflows/cd.yml builds, scans, signs and pushes the images and commits their digests to the staging overlay. Argo CD deploys by pulling those manifests, so CI never holds cluster credentials.
 
-Interim, until the platform exists (2026-09-28): images go to GHCR instead of Harbor, Cosign signs keyless with the workflow's GitHub OIDC identity instead of a key in Vault, the GitHub token replaces Vault JWT auth, the staging digests live in this repo's `deploy/overlays/staging` instead of a separate GitOps repo, and there is no ZAP stage until staging is up.
+Two pipelines after CI on `main`, until the T3.09 host exists:
+- **cd.yml (GitHub's runners)**: images to GHCR, signed keyless with the workflow's GitHub OIDC identity, and digests in `deploy/overlays/staging` (no cluster runs staging yet).
+- **cd-local.yml (T3.15, the self-hosted runner `ticket-local` on the PC that hosts the local k3d cluster, `make cluster-runner`)**: the full target flow.
+  1. Build, Trivy, push to Harbor.
+  2. Sign and attest the SBOM with Vault transit key `cosign`. The job's own GitHub OIDC token logs in to Vault JWT auth (`jwt-github`, role `ci`, bound to this repository, `main`, cd-local.yml and a self-hosted runner), so no secret is stored in GitHub.
+  3. Pin the digests in `deploy/overlays/local`, which Argo CD syncs to `ticket-local`.
+  4. ZAP baseline of the deployed app.
+
+  On the host, the same job runs on a runner inside the company network against the real Harbor and Vault, with `deploy/overlays/staging`. The staging digests live in this repository, not a separate GitOps repo.
 
 ```mermaid
 flowchart LR
@@ -103,8 +111,8 @@ flowchart LR
 | Build | Docker Buildx | Build error |
 | SBOM | Syft (SPDX JSON, attached to the image as a Cosign attestation) | — |
 | Image scan | Trivy image, before the push | HIGH/CRITICAL with fix |
-| Sign | Cosign (interim: keyless, GitHub OIDC; later key in Vault) | Signing fails |
-| DAST | OWASP ZAP baseline on staging | High-risk alert |
+| Sign | Cosign v2 with Vault transit key `cosign` (cd-local.yml); keyless GitHub OIDC for GHCR (cd.yml) | Signing fails |
+| DAST | OWASP ZAP baseline (`deploy/local/zap-baseline.sh`) on the deployed app, after Argo CD syncs | High-risk alert |
 
 Release flow:
 

@@ -201,6 +201,14 @@ cluster-vault-backup: cluster-vault
 cluster-vault-restore-test:
 	bash deploy/local/vault-restore-test.sh
 
+# T3.15: the self-hosted GitHub Actions runner for .github/workflows/cd-local.yml (deploy/local/runner-setup.sh), and
+# the ZAP baseline scan that workflow ends with, runnable by hand.
+.PHONY: cluster-runner cluster-zap
+cluster-runner:
+	bash deploy/local/runner-setup.sh
+cluster-zap:
+	bash deploy/local/zap-baseline.sh
+
 # T3.12: unsigned, non-Harbor, root and limit-less Pods are refused; signed Harbor images run as verified digests.
 cluster-check-policies:
 	bash deploy/local/policy-check.sh

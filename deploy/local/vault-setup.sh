@@ -119,4 +119,15 @@ ci=$([ ! -e deploy/local/harbor-robots.json ] ||
 	node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).ci;if(r)process.stdout.write(JSON.stringify({data:{username:r.username,password:r.secret}}))' deploy/local/harbor-robots.json)
 [ -z "$ci" ] || printf '%s' "$ci" | v write secret/data/ticket/ci/harbor - >/dev/null
 
+# T3.15: CI signs in with GitHub's own OIDC token (JWT auth), so no Vault secret is stored in GitHub. Only the job of
+# .github/workflows/cd-local.yml on main of this repository, on a self-hosted runner, gets role ci: sign and verify
+# with the Cosign key and read the Harbor robot's login, for 15 minutes.
+repo=bell77m/case-ticket-sys
+v auth list -format=json </dev/null | grep -q '"jwt-github/"' || v auth enable -path=jwt-github jwt </dev/null
+v write auth/jwt-github/config oidc_discovery_url=https://token.actions.githubusercontent.com \
+	bound_issuer=https://token.actions.githubusercontent.com </dev/null >/dev/null
+printf 'path "secret/data/ticket/ci/harbor" {\n  capabilities = ["read"]\n}\n' | v policy write ci-harbor - >/dev/null
+printf '{"role_type":"jwt","user_claim":"sub","bound_audiences":["vault"],"bound_claims":{"repository":"%s","ref":"refs/heads/main","job_workflow_ref":"%s/.github/workflows/cd-local.yml@refs/heads/main","runner_environment":"self-hosted"},"token_policies":["cosign-sign","ci-harbor"],"token_ttl":"15m","token_max_ttl":"30m"}' "$repo" "$repo" |
+	v write auth/jwt-github/role/ci - >/dev/null
+
 echo "Vault ready: sealed=$(v0 status -format=json </dev/null | field sealed), secrets at secret/ticket/$env/{app,tls}"

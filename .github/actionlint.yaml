@@ -1,0 +1,4 @@
+# actionlint: the label of this repository's self-hosted runner (deploy/local/runner-setup.sh, cd-local.yml).
+self-hosted-runner:
+  labels:
+    - ticket-local

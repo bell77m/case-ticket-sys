@@ -1,0 +1,69 @@
+# CD to the local k3d cluster (T3.15), on the self-hosted runner of the PC that hosts it (make cluster-runner): after
+# CI passes on a push to main, build and scan the three images, push them to the local Harbor, sign them and attest
+# their SBOMs with the Cosign key in Vault, pin their digests in deploy/overlays/local (Argo CD syncs ticket-local),
+# then run a ZAP baseline scan of the deployed app.
+# No secret lives in GitHub: the job's own OIDC token logs in to Vault (JWT auth, role ci, bound to this file on main).
+# A separate workflow from cd.yml (GHCR, staging), so a PC that is switched off only delays this one.
+name: CD local
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-local
+  cancel-in-progress: false
+
+jobs:
+  local:
+    name: Build, sign, deploy to the local cluster, ZAP
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: [self-hosted, ticket-local]
+    timeout-minutes: 45
+    permissions:
+      contents: write # commit the digests to deploy/overlays/local
+      id-token: write # the OIDC token Vault checks
+    defaults:
+      run:
+        shell: bash
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Build, scan, push, sign and attest (Harbor, Vault)
+        run: bash deploy/local/cd-local.sh build "$RUNNER_TEMP/local-refs"
+
+      # On top of the newest main (cd.yml may have committed staging digests meanwhile). [skip ci]: no new CI run.
+      - name: Pin the digests for Argo CD
+        run: |
+          git fetch -q origin main
+          git checkout -q -B cd-local origin/main
+          bash deploy/local/cd-local.sh pin "$RUNNER_TEMP/local-refs"
+          if git diff --quiet; then echo "ticket-local already runs these images"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "deploy(local): ticket-app sha-${SHA::12} [skip ci]"
+          for _ in 1 2 3; do git push -q origin HEAD:main && exit 0; git pull -q --rebase origin main; done
+          exit 1
+
+      # ponytail: a fixed wait for Argo CD (60 s polling) and the rollout; poll Argo CD's API once CI has a login there.
+      - name: ZAP baseline scan of the deployed app
+        run: |
+          sleep 150
+          bash deploy/local/zap-baseline.sh "$RUNNER_TEMP/zap.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}/zap.json
+          if-no-files-found: ignore
+          retention-days: 30
