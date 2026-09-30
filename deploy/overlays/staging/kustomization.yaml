@@ -9,13 +9,13 @@ images:
   # (all three images from the same commit). Interim registry GHCR; Harbor once T3.12 names the project.
   - name: ticket-app
     newName: ghcr.io/bell77m/case-ticket-sys/ticket-app
-    digest: sha256:e5258ba8b7cd7ac604def3164a15a0bb3e3fbda8f2917e39d90bf277afee38da
+    digest: sha256:47c308e4bf9949f22a174f37e10558e0eeeb77898c3344524e8ac78f96f31558
   - name: ticket-migrate
     newName: ghcr.io/bell77m/case-ticket-sys/ticket-migrate
-    digest: sha256:34f340fc3b146ca5370afe0c015809e7e6309531050f0c7f014d6924a22cbdeb
+    digest: sha256:2df76cb995c0b95e5794fee2b850b3f049557566deb376a96ff649124156a931
   - name: ticket-backup # the tag is replaced by a digest on the first CD run after deploy/backup.Dockerfile landed
     newName: ghcr.io/bell77m/case-ticket-sys/ticket-backup
-    digest: sha256:c52cb7acafb1fb28f3ac81fe056ad59faadf526a51a8be51c20186779596f1e6
+    digest: sha256:4135298a8863fce00eb524e9605d5d620d88a9a8b9e0aa950aa7550707343817
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge
