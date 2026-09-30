@@ -285,6 +285,7 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Done when: suite passes in all 4 languages.
     - Also (from T2.14): add script-src and style-src to the CSP through `kit.csp` hashes, and run the e2e suite against the built app (Go serving the SPA) to prove nothing breaks.
 
+    - Status: local part done (2026-09-29). `frontend/e2e/smoke.spec.ts` passes in all 4 languages against the built app, under the new `script-src`/`style-src` CSP, and CI runs it with the rest of the suite. Still to do: run it against staging once T3.15 deploys there, with test accounts for each role. See [note](notes/T3.17.md).
 ## Pilot — Week 4
 
 - [ ] **P.01** Load real data — S · deps: T3.15 · ops

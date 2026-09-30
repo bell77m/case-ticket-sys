@@ -19,8 +19,8 @@ import (
 )
 
 // securityHeaders sets defaults on every response; a handler may override them (evidence downloads set a sandbox CSP).
-// ponytail: no script-src or style-src yet: the SvelteKit build bootstraps with an inline script, so a script policy
-// needs kit.csp hashes and an e2e run first (see docs/PLAN.md T2.14).
+// script-src and style-src are not here: the built index.html carries them as a <meta> tag with the hash of its inline
+// bootstrap script, which changes with each build (kit.csp in frontend/vite.config.ts, T3.17). Browsers enforce both.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

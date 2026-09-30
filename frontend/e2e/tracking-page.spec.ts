@@ -67,7 +67,7 @@ test('guest opens the tracking link, views evidence and replies', async ({ page 
 	await expect(page.getByText('It happened again this morning.')).toBeVisible();
 
 	// DESIGN.md "Accessibility": no WCAG 2.2 AA violations on the tracking page.
-	await page.addScriptTag({ content: axeSource });
+	await page.evaluate(axeSource); // through DevTools: the CSP (T3.17) refuses an injected inline script
 	const violations = await page.evaluate(async () => {
 		// @ts-expect-error axe is injected above
 		const r = await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] });

@@ -14,11 +14,11 @@
 		<p class="hint">{m.welcome_track_hint()}</p>
 	</div>
 
-	<section class="steps rise" style="--delay: 100ms" aria-labelledby="steps-title">
+	<section class="steps rise" style:--delay="100ms" aria-labelledby="steps-title">
 		<h2 id="steps-title">{m.welcome_steps()}</h2>
 		<ol>
 			{#each steps as step, i (i)}
-				<li class="rise" style="--delay: {200 + i * 100}ms">{step()}</li>
+				<li class="rise" style:--delay="{200 + i * 100}ms">{step()}</li>
 			{/each}
 		</ol>
 	</section>

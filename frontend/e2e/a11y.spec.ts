@@ -14,7 +14,7 @@ for (const [name, path] of [
 			await context.addCookies([{ name: 'PARAGLIDE_LOCALE', value: locale, url: baseURL }]);
 			await page.goto(path);
 			await page.getByRole('heading', { level: 1 }).waitFor();
-			await page.addScriptTag({ content: axeSource });
+			await page.evaluate(axeSource); // through DevTools: the CSP (T3.17) refuses an injected inline script
 			const violations = await page.evaluate(async () => {
 				// @ts-expect-error axe is injected above
 				const r = await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] });

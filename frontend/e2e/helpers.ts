@@ -47,7 +47,7 @@ const axeSource = readFileSync('node_modules/axe-core/axe.min.js', 'utf8');
 
 /** Runs axe-core (WCAG 2.2 AA) on the current page and returns "rule (nodes)" per violation. */
 export async function axeViolations(page: Page) {
-	await page.addScriptTag({ content: axeSource });
+	await page.evaluate(axeSource); // through DevTools: the CSP (T3.17) refuses an injected inline script
 	return page.evaluate(async () => {
 		// @ts-expect-error axe is injected above
 		const r = await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] });

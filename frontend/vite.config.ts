@@ -14,7 +14,20 @@ export default defineConfig({
 			},
 
 			// SPA: the Go server embeds build/ and serves index.html for unknown paths.
-			adapter: adapter({ fallback: 'index.html' })
+			adapter: adapter({ fallback: 'index.html' }),
+
+			// CSP (T3.17): the SPA's inline bootstrap script is allowed by its hash, sent as a <meta> tag in the built
+			// index.html. The Go server's header (securityHeaders in main.go) keeps frame-ancestors, object-src, base-uri
+			// and form-action. Vite adds 'unsafe-inline' to style-src in dev only. The one inline style allowed is SvelteKit's
+			// route announcer (visually hidden; blocked, it shows on screen): its exact value, by hash. A SvelteKit update
+			// that changes it fails e2e/smoke.spec.ts against the built app, which prints the new hash.
+			csp: {
+				mode: 'hash',
+				directives: {
+					'script-src': ['self'],
+					'style-src': ['self', 'unsafe-hashes', 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo=']
+				}
+			}
 		}),
 
 		paraglideVitePlugin({
