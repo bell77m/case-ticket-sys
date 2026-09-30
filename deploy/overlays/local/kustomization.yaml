@@ -14,7 +14,7 @@ images:
   # third-party ones copied from the host's Docker. Kyverno pins each Pod to the digest it verified.
   - name: ticket-app
     newName: harbor.localtest.me/ticket/ticket-app
-    digest: sha256:4fb06a74bcf1c7779342cf174e9e063b6eff1deb52e63644a0ee91aa8598553f
+    digest: sha256:940694b284f05556f28bf16f55ccc65c40b089338f0d6bae6b16d1b28ebd8c5b
   - name: ticket-migrate
     newName: harbor.localtest.me/ticket/ticket-migrate
     digest: sha256:14517b88571b66035b49d074c6c033145849b4214c6a61d9af400d5b80c2aa17
