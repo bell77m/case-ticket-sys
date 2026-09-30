@@ -55,6 +55,10 @@
 	// Gregorian calendar in every language, including Thai (open question in docs/PLAN.md).
 	const dateFmt = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short', calendar: 'gregory' });
 	const fmt = (iso: string) => dateFmt.format(new Date(iso));
+	// The table's Created cell: date and time may go on two lines, but neither breaks inside. One unbroken line was
+	// too wide in Burmese at 1024px and squeezed the summary (layout.spec.ts).
+	const dayOnly = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', calendar: 'gregory' });
+	const timeOnly = new Intl.DateTimeFormat(getLocale(), { timeStyle: 'short', calendar: 'gregory' });
 
 	// Filters a report card adds (FR-P1): a period and an as-of day, shown as chips that can be removed.
 	const dayFmt = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', calendar: 'gregory', timeZone: 'UTC' });
@@ -171,7 +175,10 @@
 					</td>
 					<td>{place(t)}</td>
 					<td>{t.assignee?.name ?? m.queue_assignee_none()}</td>
-					<td class="nowrap">{fmt(t.created_at)}</td>
+					<td>
+						<span class="nowrap">{dayOnly.format(new Date(t.created_at))}</span>
+						<span class="nowrap">{timeOnly.format(new Date(t.created_at))}</span>
+					</td>
 				</tr>
 			{/each}
 		</tbody>
