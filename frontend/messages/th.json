@@ -155,7 +155,6 @@
 	"detail_saved": "บันทึกการเปลี่ยนแปลงแล้ว",
 	"detail_no_changes": "ไม่มีสิ่งที่ต้องบันทึก",
 	"detail_assign_me": "มอบหมายให้ฉัน",
-	"detail_err_transition": "ไม่สามารถเปลี่ยนสถานะนี้ได้ในขณะนี้ ระบบได้โหลดตั๋วใหม่แล้ว",
 	"detail_err_closed": "ตั๋วนี้ปิดแล้ว จึงไม่สามารถเปลี่ยนแปลงได้",
 	"detail_err_assign_self": "คุณสามารถมอบหมายตั๋วให้ตัวเองเท่านั้น",
 	"detail_err_forbidden": "คุณไม่มีสิทธิ์ทำสิ่งนี้",
@@ -404,5 +403,15 @@
 	"activity_action_role_created": "เพิ่มบทบาท",
 	"activity_action_role_changed": "เปลี่ยนสิทธิ์ของบทบาท",
 	"activity_action_report_exported": "ส่งออกรายงาน",
-	"activity_action_activity_exported": "ส่งออกบันทึกกิจกรรม"
+	"activity_action_activity_exported": "ส่งออกบันทึกกิจกรรม",
+	"admin_nav": "หน้าผู้ดูแลระบบ",
+	"admin_filter": "ค้นหาในรายการนี้",
+	"admin_no_match": "ไม่พบรายการที่ตรงกับการค้นหา",
+	"staff_filter_helper": "ชื่อ ชื่อผู้ใช้ หรือบทบาท",
+	"lookups_filter_helper": "ชื่อใดก็ได้ ในภาษาใดก็ได้",
+	"roles_unsaved": "มีการเปลี่ยนแปลงที่ยังไม่บันทึก",
+	"roles_discard": "ยกเลิกการเปลี่ยนแปลงของ {role}",
+	"roles_leave_confirm": "การเปลี่ยนแปลงบทบาทยังไม่ได้บันทึก ต้องการออกจากหน้านี้หรือไม่",
+	"lookups_show_inactive": "แสดงหมวดหมู่และไลน์ที่ปิดใช้งาน ({count})",
+	"lookups_edit_title": "แก้ไข {name}"
 }

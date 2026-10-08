@@ -1,6 +1,6 @@
 <!-- Roles as a permission grid (T2.10, FR-R2, FR-A3). Layout: DESIGN.md "Roles". -->
 <script lang="ts">
-	import { invalidateAll } from '$app/navigation';
+	import { beforeNavigate, invalidateAll } from '$app/navigation';
 	import { ApiError, createRole, setRolePermissions, type Role } from '$lib/api';
 	import Alert from '$lib/components/Alert.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -52,10 +52,23 @@
 		const rest = granted(r).filter((x) => x !== p);
 		drafts[r.id] = on ? [...rest, p] : rest;
 	}
+	// A cell differs from the saved role; a role with any such cell has unsaved changes.
+	const changed = (r: Role, p: string) => !!drafts[r.id] && drafts[r.id].includes(p) !== r.permissions.includes(p);
+	const dirty = (r: Role) => permissions.some(([p]) => changed(r, p));
+	function discard(r: Role) {
+		delete drafts[r.id];
+		if (saveError?.id === r.id) saveError = null;
+	}
+	// Leaving with unsaved ticks asks first; closing the tab gets the browser's own prompt.
+	beforeNavigate(({ cancel, type }) => {
+		if (!data.roles?.some(dirty)) return;
+		if (type === 'leave' || !confirm(m.roles_leave_confirm())) cancel();
+	});
+
 	let saveError = $state.raw<{ id: number; text: string } | null>(null);
 
 	async function save(r: Role) {
-		if (!drafts[r.id]) return showToast(m.detail_no_changes());
+		if (!dirty(r)) return showToast(m.detail_no_changes());
 		busy = true;
 		saveError = null;
 		try {
@@ -129,16 +142,21 @@
 	</span>
 {/snippet}
 
+{#snippet unsaved(r: Role)}
+	{#if dirty(r)}<span class="unsaved"><span class="dot" aria-hidden="true"></span>{m.roles_unsaved()}</span>{/if}
+{/snippet}
+
 {#snippet footer(r: Role)}
 	{#if editable(r)}
-		<Button variant="secondary" disabled={busy} onclick={() => save(r)}>{m.roles_save({ role: r.name })}</Button>
+		<Button variant={dirty(r) ? 'primary' : 'secondary'} disabled={busy} onclick={() => save(r)}>{m.roles_save({ role: r.name })}</Button>
+		{#if dirty(r)}
+			<Button variant="secondary" disabled={busy} onclick={() => discard(r)}>{m.roles_discard({ role: r.name })}</Button>
+		{/if}
 	{:else if canEdit}
 		<span class="muted">{m.roles_fixed()}</span>
 	{/if}
 	{#if saveError?.id === r.id}<Alert variant="error">{saveError.text}</Alert>{/if}
 {/snippet}
-
-<a class="back" href="/staff">{m.detail_back()}</a>
 
 <header>
 	<h1>{m.roles_heading()}</h1>
@@ -159,6 +177,7 @@
 					<th scope="col">
 						<span class="role-name">{r.name}</span>
 						<span class="count">{staffCount(r)}</span>
+						{@render unsaved(r)}
 					</th>
 				{/each}
 			</tr>
@@ -168,7 +187,7 @@
 				<tr>
 					<th scope="row">{@render permLabel(p, label)}</th>
 					{#each data.roles as r (r.id)}
-						<td class="cell">
+						<td class={['cell', changed(r, p) && 'changed']}>
 							{#if editable(r)}
 								<label class="tick">{@render checkbox(r, p, m.roles_grant({ role: r.name, permission: label() }))}</label>
 							{:else}
@@ -197,10 +216,11 @@
 				<div class="top">
 					<h2>{r.name}</h2>
 					<span class="muted">{staffCount(r)}</span>
+					{@render unsaved(r)}
 				</div>
 				<ul class="perms">
 					{#each permissions as [p, label] (p)}
-						<li>
+						<li class={[changed(r, p) && 'changed']}>
 							{#if editable(r)}
 								<label class="row">{@render checkbox(r, p)} {@render permLabel(p, label)}</label>
 							{:else}
@@ -238,12 +258,6 @@
 {/if}
 
 <style>
-	.back {
-		display: inline-block;
-		margin-bottom: var(--space-md);
-		font: var(--font-label);
-		color: var(--color-ink);
-	}
 	header {
 		margin-bottom: var(--space-lg);
 	}
@@ -294,6 +308,34 @@
 	}
 	.cell {
 		text-align: center;
+	}
+	/* A tick that differs from the saved role, on warning tint; the "Unsaved changes" pill says it in words. */
+	.changed {
+		background: var(--color-warning-tint);
+	}
+	.perms .changed {
+		margin-inline: calc(-1 * var(--space-xs));
+		padding-inline: var(--space-xs);
+		border-radius: var(--radius-md);
+	}
+	/* Badge-pill like the status badges: tint, dot and ink text. */
+	.unsaved {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-xs);
+		margin-top: var(--space-xxs);
+		padding: var(--space-xxs) var(--space-sm);
+		border-radius: var(--radius-pill);
+		background: var(--color-warning-tint);
+		font: var(--font-caption);
+		color: var(--color-ink);
+		white-space: nowrap;
+	}
+	.unsaved .dot {
+		width: var(--space-xs);
+		height: var(--space-xs);
+		border-radius: var(--radius-full);
+		background: var(--color-warning);
 	}
 	tfoot .cell {
 		vertical-align: top;

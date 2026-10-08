@@ -13,7 +13,7 @@
 		type TimelineEvent
 	} from '$lib/api';
 	import Alert from '$lib/components/Alert.svelte';
-	import Badge, { labels, priorities, type Status } from '$lib/components/Badge.svelte';
+	import Badge, { labels, priorities, statuses, type Status } from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import TextArea from '$lib/components/TextArea.svelte';
@@ -30,20 +30,12 @@
 	const can = (p: string) => data.me.permissions.includes(p);
 	const selfAssignOnly = $derived(data.me.role === 'Agent'); // the API lets an Agent assign only themselves
 
-	// Mirrors staffTransitions in backend/internal/api/actions.go. Nothing moves to or from closed.
-	const moves: Partial<Record<Status, Status[]>> = {
-		new: ['in_progress'],
-		in_progress: ['waiting', 'resolved'],
-		waiting: ['in_progress'],
-		resolved: ['in_progress']
-	};
 	// The Details form is filled from `base`: the ticket as opened, as reloaded after an own action, or as live-refreshed
 	// (FR-P3) while the form held no unsaved edits. The rest of the page always shows the latest ticket, so a change
 	// elsewhere never overwrites what the user is editing. Save sends only what differs from base, so it cannot revert
 	// someone else's change either.
 	const ticketId = $derived(t?.id); // another ticket (navigation) refills the form
 	let base = $derived(ticketId === undefined ? null : untrack(() => data.ticket));
-	const nextStatuses = $derived(base ? (moves[base.status] ?? []) : []);
 	const option = (code: keyof typeof labels) => ({ value: code, label: labels[code]() });
 	const baseCategory = $derived(String(base?.category_id ?? ''));
 	const baseAssignee = $derived(String(base?.assignee?.id ?? ''));
@@ -77,7 +69,6 @@
 
 	// API error codes, translated here (CLAUDE.md "i18n").
 	const errorText: Record<string, () => string> = {
-		'ticket.bad_transition': m.detail_err_transition,
 		'ticket.closed': m.detail_err_closed,
 		'ticket.assign_self_only': m.detail_err_assign_self,
 		'ticket.not_found': m.detail_not_found,
@@ -238,9 +229,8 @@
 					{#if can('ticket.update') || (can('ticket.assign') && !selfAssignOnly)}
 						<form onsubmit={save}>
 							{#if can('ticket.update')}
-								{#if nextStatuses.length}
-									<Select label={m.queue_col_status()} options={[base?.status ?? t.status, ...nextStatuses].map(option)} bind:value={status} />
-								{/if}
+								<!-- Any status, closed and reopening included (FR-T5). -->
+								<Select label={m.queue_col_status()} options={statuses.map(option)} bind:value={status} />
 								<Select label={m.queue_col_priority()} placeholder={m.priority_none()} options={priorities.map(option)} bind:value={priority} />
 								<Select
 									label={m.detail_f_category()}

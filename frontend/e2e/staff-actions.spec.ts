@@ -68,3 +68,21 @@ test('agent works a ticket, timeline shows who moved and who closed it', async (
 	await expect(rows.filter({ hasText: 'to Closed' })).toContainText('Guest');
 	expect(await axeViolations(page)).toEqual([]);
 });
+
+// FR-T5: staff may set any status, including closing a ticket and reopening a closed one.
+test('agent closes a ticket and reopens it', async ({ page, request }) => {
+	const { id } = await guestTicket(request, 'The label printer in building B prints blank labels.');
+	await openTicket(page, 'agent', id);
+	const details = page.getByRole('region', { name: 'Details' });
+	const timeline = page.getByRole('region', { name: 'Timeline' });
+	const status = details.getByLabel('Status', { exact: true });
+	await expect(status.getByRole('option')).toHaveText(['New', 'In Progress', 'Waiting on User', 'Resolved', 'Closed']);
+
+	await status.selectOption('closed');
+	await details.getByRole('button', { name: 'Save changes' }).click();
+	await expect(timeline).toContainText('from New to Closed');
+
+	await status.selectOption('in_progress');
+	await details.getByRole('button', { name: 'Save changes' }).click();
+	await expect(timeline).toContainText('from Closed to In Progress');
+});

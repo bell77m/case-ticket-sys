@@ -155,7 +155,6 @@
 	"detail_saved": "Changes saved",
 	"detail_no_changes": "Nothing to save",
 	"detail_assign_me": "Assign to me",
-	"detail_err_transition": "This status change is not allowed now. The ticket has been reloaded.",
 	"detail_err_closed": "This ticket is closed, so it cannot be changed.",
 	"detail_err_assign_self": "You can only assign tickets to yourself.",
 	"detail_err_forbidden": "You do not have permission to do this.",
@@ -444,5 +443,15 @@
 	"activity_action_role_created": "Role added",
 	"activity_action_role_changed": "Role permissions changed",
 	"activity_action_report_exported": "Report exported",
-	"activity_action_activity_exported": "Activity log exported"
+	"activity_action_activity_exported": "Activity log exported",
+	"admin_nav": "Admin pages",
+	"admin_filter": "Search this list",
+	"admin_no_match": "Nothing matches your search.",
+	"staff_filter_helper": "Name, username or role",
+	"lookups_filter_helper": "Any name, in any language",
+	"roles_unsaved": "Unsaved changes",
+	"roles_discard": "Discard changes to {role}",
+	"roles_leave_confirm": "Your role changes are not saved. Leave this page?",
+	"lookups_show_inactive": "Show deactivated categories and lines ({count})",
+	"lookups_edit_title": "Edit {name}"
 }

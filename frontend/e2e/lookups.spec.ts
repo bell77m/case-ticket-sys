@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { baseURL, axeBothSizes, signIn } from './helpers';
+import { baseURL, axeBothSizes, axeViolations, signIn } from './helpers';
 
 // T2.11 (FR-I4): a line added in the admin page shows in the guest form in all four languages; a deactivated line
 // leaves it. Each run adds its own building and floor, so it cannot clash with seed data. The line is left
@@ -36,8 +36,15 @@ test('a new line shows in the guest form in every language until it is deactivat
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Categories and locations');
 		await expect(page.locator('#account-menu')).toBeHidden();
 
+		// One list at a time: the Locations tab, kept in the URL. Its add form opens in a dialog.
+		await page.getByRole('link', { name: /^Locations/ }).click();
+		await expect(page).toHaveURL(/tab=locations/);
+		await expect(page.getByRole('button', { name: 'Add line', exact: true })).toBeHidden();
+		await page.getByRole('button', { name: 'Add a line', exact: true }).click();
+
 		// Nothing picked: the building select says so.
-		const add = page.locator('form').filter({ has: page.getByRole('button', { name: 'Add line' }) });
+		// Located by its title, so it still resolves once the dialog is closed (getByRole skips hidden elements).
+		const add = page.locator('dialog', { has: page.locator('#add-title') }).locator('form');
 		const pickBuilding = add.getByLabel('Building', { exact: true });
 		await add.getByRole('button', { name: 'Add line' }).click();
 		await expect(pickBuilding).toHaveAttribute('aria-invalid', 'true');
@@ -58,22 +65,25 @@ test('a new line shows in the guest form in every language until it is deactivat
 		await lineFields.getByLabel('ไทย', { exact: true }).fill(line.th);
 		await add.getByRole('button', { name: 'Add line' }).click();
 
-		// The innermost list item is the line row (building and floor items contain it).
-		const row = page.getByRole('listitem').filter({ hasText: line.en }).last();
+		// Saved: the dialog closes and the line shows as a card (phone size).
+		await expect(page.getByRole('dialog')).toBeHidden();
+		const row = page.getByRole('listitem').filter({ hasText: line.en });
 		await expect(row).toContainText('Active');
 		await expect(row).toContainText(line.th);
 		await expect(pickBuilding).toHaveValue('');
 
-		// Edit opens the names inline; Save closes them and focus goes back to Edit.
+		// Edit opens the names in a dialog; Save closes it and focus goes back to Edit.
 		const editButton = row.getByRole('button', { name: 'Edit' });
 		await editButton.click();
-		await expect(editButton).toHaveAttribute('aria-expanded', 'true');
+		const editDialog = page.getByRole('dialog');
+		await expect(editDialog).toContainText(`Edit ${building.en} / ${floor.en} / ${line.en}`);
+		expect(await axeViolations(page)).toEqual([]);
 		line['zh-CN'] = `E2E 线路 ${s}`;
-		await row.getByRole('group', { name: 'Line', exact: true }).getByLabel('中文', { exact: true }).fill(line['zh-CN']);
-		await row.getByRole('button', { name: 'Save' }).click();
+		await editDialog.getByRole('group', { name: 'Line', exact: true }).getByLabel('中文', { exact: true }).fill(line['zh-CN']);
+		await editDialog.getByRole('button', { name: 'Save' }).click();
 		await expect(row).toContainText(line['zh-CN']);
+		await expect(editDialog).toBeHidden();
 		await expect(editButton).toBeFocused();
-		await expect(row.getByRole('group')).toHaveCount(0);
 		await axeBothSizes(page, 'admin-lookups');
 
 		// FR-I4: the guest form shows the names in each language.
@@ -85,15 +95,23 @@ test('a new line shows in the guest form in every language until it is deactivat
 			await expect(selects.nth(2).locator('option:checked')).toHaveText(line[locale]);
 		}
 
-		// Deactivated: the line stays in the admin list, muted, and leaves the guest form.
+		// Deactivated: the line stays in the admin list for this visit, muted, and leaves the guest form.
 		await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'en', url: baseURL }]);
-		await page.goto('/staff/admin/lookups');
+		await page.goto('/staff/admin/lookups?tab=locations');
 		await row.getByRole('button', { name: 'Deactivate' }).click();
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toContainText(`Deactivate ${building.en} / ${floor.en} / ${line.en}?`);
 		await dialog.getByRole('button', { name: 'Deactivate' }).click();
 		await expect(row).toContainText('Deactivated');
 		await expect(row.getByRole('button', { name: 'Reactivate' })).toBeVisible();
+
+		// Deactivated rows pile up, so the next visit hides them until "Show deactivated" is ticked.
+		await page.reload();
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Categories and locations');
+		await expect(row).toHaveCount(0);
+		await expect(pickBuilding.locator('option', { hasText: building.en })).toHaveCount(0);
+		await page.getByLabel(/Show deactivated categories and lines/).check();
+		await expect(row).toContainText('Deactivated');
 
 		const selects = await openReport(page, 'en');
 		await expect(selects.nth(0).locator('option', { hasText: 'Building A' })).toHaveCount(1); // loaded

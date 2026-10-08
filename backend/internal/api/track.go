@@ -132,10 +132,12 @@ func (s *Server) withLockedTicket(r *http.Request, id int64, fn func(tx *gorm.DB
 func setStatus(tx *gorm.DB, t *models.Ticket, to string, actor audit.Actor, ip string) error {
 	from := t.Status // read first: GORM's Updates writes the new values into t
 	updates := map[string]any{"status": to}
-	switch {
-	case to == models.StatusResolved:
+	switch to {
+	case models.StatusResolved:
 		updates["resolved_at"] = gorm.Expr("now()") // DB clock, like created_at; auto-close counts from it (FR-T5)
-	case from == models.StatusResolved && to == models.StatusInProgress:
+	case models.StatusClosed:
+		updates["resolved_at"] = gorm.Expr("coalesce(resolved_at, now())") // closed straight from open counts as resolved now
+	default:
 		updates["resolved_at"] = nil // reopened: resolution time restarts
 	}
 	if err := tx.Model(t).Updates(updates).Error; err != nil {

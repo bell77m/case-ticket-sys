@@ -16,18 +16,6 @@ import (
 
 // Staff ticket actions (T2.04): status, priority, category (FR-T3, FR-T5) and assignee; comments (T2.05, FR-T6).
 
-// staffTransitions are the lifecycle moves staff may make (docs/REQUIREMENTS.md). Nothing goes to or from
-// closed: a ticket closes only when the guest confirms or the auto-close job runs (FR-T5).
-var staffTransitions = map[[2]string]bool{
-	{models.StatusNew, models.StatusInProgress}:      true,
-	{models.StatusInProgress, models.StatusWaiting}:  true,
-	{models.StatusInProgress, models.StatusResolved}: true,
-	{models.StatusWaiting, models.StatusInProgress}:  true,
-	{models.StatusResolved, models.StatusInProgress}: true,
-}
-
-var errBadTransition = errors.New("status transition not allowed")
-
 type ticketPatch struct {
 	Status     *string `json:"status"`
 	Priority   *string `json:"priority"`
@@ -73,10 +61,6 @@ func (s *Server) updateTicket(w http.ResponseWriter, r *http.Request) {
 
 	actor, ip := audit.Staff(currentStaff(r).ID), s.clientIP(r)
 	err := s.withLockedTicket(r, t.ID, func(tx *gorm.DB, t *models.Ticket) error {
-		// Checked before any write, so a rejected status leaves priority and category unchanged too.
-		if in.Status != nil && !staffTransitions[[2]string{t.Status, *in.Status}] {
-			return errBadTransition
-		}
 		if from := optText(t.Priority); in.Priority != nil && from != *in.Priority {
 			if err := tx.Model(t).Update("priority", *in.Priority).Error; err != nil {
 				return err
@@ -93,7 +77,8 @@ func (s *Server) updateTicket(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if in.Status != nil {
+		// Staff may set any status, closed and reopening included (FR-T5).
+		if in.Status != nil && *in.Status != t.Status {
 			return setStatus(tx, t, *in.Status, actor, ip)
 		}
 		return nil
@@ -233,8 +218,6 @@ func writeActionResult(w http.ResponseWriter, err error, what string) {
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
-	case errors.Is(err, errBadTransition):
-		writeError(w, http.StatusConflict, "ticket.bad_transition")
 	case errors.Is(err, errTicketClosed):
 		writeError(w, http.StatusConflict, "ticket.closed")
 	case errors.Is(err, gorm.ErrRecordNotFound): // deleted since staffTicketByPath read it

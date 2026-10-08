@@ -155,7 +155,6 @@
 	"detail_saved": "更改已保存",
 	"detail_no_changes": "没有需要保存的更改",
 	"detail_assign_me": "分配给我",
-	"detail_err_transition": "当前不允许此状态变更。工单已重新加载。",
 	"detail_err_closed": "此工单已关闭，无法更改。",
 	"detail_err_assign_self": "您只能将工单分配给自己。",
 	"detail_err_forbidden": "您没有执行此操作的权限。",
@@ -404,5 +403,15 @@
 	"activity_action_role_created": "添加角色",
 	"activity_action_role_changed": "更改角色权限",
 	"activity_action_report_exported": "导出报表",
-	"activity_action_activity_exported": "导出操作日志"
+	"activity_action_activity_exported": "导出操作日志",
+	"admin_nav": "管理页面",
+	"admin_filter": "在此列表中搜索",
+	"admin_no_match": "没有符合搜索条件的结果。",
+	"staff_filter_helper": "姓名、用户名或角色",
+	"lookups_filter_helper": "任意语言的任意名称",
+	"roles_unsaved": "有未保存的更改",
+	"roles_discard": "放弃对 {role} 的更改",
+	"roles_leave_confirm": "角色更改尚未保存。要离开此页面吗？",
+	"lookups_show_inactive": "显示已停用的类别和产线（{count}）",
+	"lookups_edit_title": "编辑 {name}"
 }

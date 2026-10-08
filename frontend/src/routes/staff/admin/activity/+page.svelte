@@ -82,7 +82,6 @@
 	}
 </script>
 
-<a class="back" href="/staff">{m.detail_back()}</a>
 <header>
 	<h1>{m.activity_heading()}</h1>
 	{#if log}
@@ -158,12 +157,6 @@
 {/if}
 
 <style>
-	.back {
-		display: inline-block;
-		margin-bottom: var(--space-md);
-		font: var(--font-label);
-		color: var(--color-ink);
-	}
 	header {
 		display: flex;
 		flex-wrap: wrap;

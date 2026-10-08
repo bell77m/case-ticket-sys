@@ -93,7 +93,7 @@ stateDiagram-v2
     Closed --> [*]
 ```
 
-- **FR-T5** A Resolved ticket closes when the guest confirms, or automatically after 7 days (actor "system").
+- **FR-T5** A Resolved ticket closes when the guest confirms, or automatically after 7 days (actor "system"). The diagram is the usual path, not a limit: staff with ticket.update may set any status, including Closed, and may reopen a Closed ticket.
 - **FR-T6** Replies are either public (guest sees) or internal notes (staff only).
 
 ## 3. Pages

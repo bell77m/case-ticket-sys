@@ -159,7 +159,11 @@
 	let kept = $state<number>();
 	const active = $derived(data.accounts?.filter((a) => a.is_active).length ?? 0);
 	const inactive = $derived((data.accounts?.length ?? 0) - active);
-	const shown = $derived(data.accounts?.filter((a) => a.is_active || showInactive || a.id === kept) ?? []);
+	// Search narrows the list as you type (display only, nothing saves).
+	let query = $state('');
+	const q = $derived(query.trim().toLocaleLowerCase());
+	const matches = (a: StaffAccount) => !q || [a.name, a.username, a.role.name].some((s) => s.toLocaleLowerCase().includes(q));
+	const shown = $derived(data.accounts?.filter((a) => (a.is_active || showInactive || a.id === kept) && matches(a)) ?? []);
 
 	// Gregorian calendar in every language, including Thai (open question in docs/PLAN.md).
 	const dateFmt = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', calendar: 'gregory' });
@@ -175,7 +179,10 @@
 			options={roleOptions}
 			bind:value={() => choice[a.id] ?? String(a.role.id), (v) => (choice[a.id] = v)}
 		/>
-		<Button type="submit" variant="secondary" disabled={busy}>{m.admin_save()}</Button>
+		<!-- A picked but unsaved role turns Save primary. -->
+		<Button type="submit" variant={choice[a.id] && choice[a.id] !== String(a.role.id) ? 'primary' : 'secondary'} disabled={busy}>
+			{m.admin_save()}
+		</Button>
 	</form>
 {/snippet}
 
@@ -196,8 +203,6 @@
 		<Button variant="secondary" disabled={busy} onclick={() => askReset(a)}>{m.staff_reset_password()}</Button>
 	{/if}
 {/snippet}
-
-<a class="back" href="/staff">{m.detail_back()}</a>
 
 <header>
 	<h1>{m.staff_heading()}</h1>
@@ -252,12 +257,24 @@
 		</div>
 	{/if}
 
-	{#if inactive}
-		<label class="show-inactive">
-			<input type="checkbox" bind:checked={showInactive} />
-			{m.staff_show_inactive({ count: count(inactive) })}
-		</label>
-	{/if}
+	<div class="list-tools">
+		<TextInput
+			label={m.admin_filter()}
+			helper={m.staff_filter_helper()}
+			type="search"
+			bind:value={query}
+			maxlength={100}
+			autocomplete="off"
+			spellcheck="false"
+		/>
+		{#if inactive}
+			<label class="show-inactive">
+				<input type="checkbox" bind:checked={showInactive} />
+				{m.staff_show_inactive({ count: count(inactive) })}
+			</label>
+		{/if}
+	</div>
+	<p class="no-match" role="status">{q && !shown.length ? m.admin_no_match() : ''}</p>
 
 	<!-- From 1024px: a table. Narrower: the same accounts as stacked cards (DESIGN.md "Staff queue"). -->
 	<table>
@@ -351,12 +368,6 @@
 </dialog>
 
 <style>
-	.back {
-		display: inline-block;
-		margin-bottom: var(--space-md);
-		font: var(--font-label);
-		color: var(--color-ink);
-	}
 	header {
 		display: flex;
 		flex-wrap: wrap;
@@ -382,12 +393,30 @@
 	.add {
 		margin-bottom: var(--space-lg);
 	}
+	/* Search and the deactivated checkbox share a row; they wrap on phones. */
+	.list-tools {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-sm) var(--space-lg);
+		margin-bottom: var(--space-sm);
+	}
+	.list-tools > :global(.field) {
+		flex: 0 1 320px;
+	}
+	.no-match {
+		margin: 0;
+		font: var(--font-body-sm);
+		color: var(--color-muted);
+	}
+	.no-match:not(:empty) {
+		margin-bottom: var(--space-sm);
+	}
 	.show-inactive {
 		display: flex;
 		align-items: center;
 		gap: var(--space-xs);
 		min-height: var(--size-control);
-		margin-bottom: var(--space-sm);
 		font: var(--font-body-sm);
 		color: var(--color-ink);
 		cursor: pointer;

@@ -162,3 +162,49 @@ test('agent has no admin links and the admin pages say no permission', async ({ 
 	// Hidden links are not the control: the API refuses the Agent too (FR-R3).
 	expect((await page.request.get('/api/staff/accounts')).status()).toBe(403);
 });
+
+test('admin tabs switch pages, search narrows the lists, and unsaved role ticks warn before leaving', async ({ page }) => {
+	await signIn(page, 'root');
+	await expect(page).toHaveURL(/\/staff$/);
+	await page.goto('/staff/admin/staff');
+	const tabs = page.getByRole('navigation', { name: 'Admin pages' });
+	await expect(tabs.getByRole('link', { name: 'Staff accounts' })).toHaveAttribute('aria-current', 'page');
+
+	// Staff search narrows as you type, on name, username or role.
+	const card = (username: string) => page.getByRole('listitem').filter({ has: page.getByText(username, { exact: true }) });
+	await page.getByLabel('Search this list').fill('agent');
+	await expect(card('agent')).toBeVisible();
+	await expect(card('root')).toHaveCount(0);
+	await page.getByLabel('Search this list').fill('no-such-person-xyz');
+	await expect(page.getByText('Nothing matches your search.')).toBeVisible();
+
+	// Roles: a changed tick shows "Unsaved changes"; leaving asks first; Discard puts the saved ticks back.
+	await tabs.getByRole('link', { name: 'Roles' }).click();
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Roles');
+	const admin = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Admin', exact: true }) });
+	const box = admin.getByRole('checkbox', { name: 'View reports' });
+	const was = await box.isChecked();
+	await box.click();
+	await expect(admin).toContainText('Unsaved changes');
+	await axeBothSizes(page, 'admin-roles-unsaved');
+
+	let asked = '';
+	page.once('dialog', (d) => {
+		asked = d.message();
+		return d.dismiss();
+	});
+	await tabs.getByRole('link', { name: 'Staff accounts' }).click();
+	await expect.poll(() => asked).toContain('Leave this page?');
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Roles');
+
+	await admin.getByRole('button', { name: 'Discard changes to Admin' }).click();
+	await expect(admin).not.toContainText('Unsaved changes');
+	expect(await box.isChecked()).toBe(was);
+
+	// Nothing unsaved: the tab goes straight on. Lookups search matches any of the four names in the open tab.
+	await tabs.getByRole('link', { name: 'Categories and locations' }).click();
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Categories and locations');
+	await expect(tabs.getByRole('link', { name: 'Categories and locations' })).toHaveAttribute('aria-current', 'page');
+	await page.getByLabel('Search this list').fill('no-such-place-xyz');
+	await expect(page.getByText('Nothing matches your search.')).toBeVisible();
+});

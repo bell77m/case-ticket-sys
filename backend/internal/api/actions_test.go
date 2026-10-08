@@ -52,8 +52,9 @@ func (e *testEnv) ticket(id int64) models.Ticket {
 
 func ticketPath(id int64) string { return "/api/staff/tickets/" + strconv.FormatInt(id, 10) }
 
-// FR-T5: staff may make exactly the lifecycle transitions; closing is left to the guest and the auto-close job.
-// Each allowed change is audited with old and new value and keeps resolved_at right.
+// FR-T5: staff may move a ticket from any status to any other, closed included. Each change is audited with old
+// and new value; saving the current status writes nothing. resolved_at is set on Resolved, kept (or set) on
+// Closed, and cleared when the ticket reopens.
 func TestStaffStatus_FRT5(t *testing.T) {
 	e := newAuthEnv(t)
 	agent := e.newStaff("Agent", true)
@@ -61,51 +62,42 @@ func TestStaffStatus_FRT5(t *testing.T) {
 	tk := e.newTicket()
 	path := ticketPath(tk.TicketID)
 
-	allowed := map[[2]string]bool{
-		{models.StatusNew, models.StatusInProgress}:      true,
-		{models.StatusInProgress, models.StatusWaiting}:  true,
-		{models.StatusInProgress, models.StatusResolved}: true,
-		{models.StatusWaiting, models.StatusInProgress}:  true,
-		{models.StatusResolved, models.StatusInProgress}: true,
-	}
 	all := []string{models.StatusNew, models.StatusInProgress, models.StatusWaiting, models.StatusResolved, models.StatusClosed}
+	done := func(s string) bool { return s == models.StatusResolved || s == models.StatusClosed }
 	for _, from := range all {
 		for _, to := range all {
 			t.Run(from+"→"+to, func(t *testing.T) {
 				e.t = t
 				resolvedAt := "NULL"
-				if from == models.StatusResolved {
+				if done(from) {
 					resolvedAt = "now() - interval '1 day'"
 				}
 				if err := e.db.Exec("UPDATE tickets SET status = ?, resolved_at = "+resolvedAt+" WHERE id = ?", from, tk.TicketID).Error; err != nil {
 					t.Fatal(err)
 				}
 				before := e.lastAuditID()
+				old := e.ticket(tk.TicketID).ResolvedAt
 
 				rec := e.sendJSON(http.MethodPatch, path, c, fmt.Sprintf(`{"status": %q}`, to))
+				if rec.Code != http.StatusNoContent {
+					t.Fatalf("PATCH = %d %s, want 204", rec.Code, rec.Body)
+				}
 				got := e.ticket(tk.TicketID)
 				audits := e.auditSince(tk.TicketID, before)
-				ok := allowed[[2]string{from, to}]
-
-				wantCode, wantStatus, wantResolved := http.StatusConflict, from, from == models.StatusResolved
-				if ok {
-					wantCode, wantStatus, wantResolved = http.StatusNoContent, to, to == models.StatusResolved
+				if got.Status != to {
+					t.Errorf("status = %s, want %s", got.Status, to)
 				}
-				if rec.Code != wantCode {
-					t.Fatalf("PATCH = %d %s, want %d", rec.Code, rec.Body, wantCode)
+				if (got.ResolvedAt != nil) != done(to) {
+					t.Errorf("resolved_at = %v, want set = %v", got.ResolvedAt, done(to))
 				}
-				if !ok && !strings.Contains(rec.Body.String(), `"ticket.bad_transition"`) {
-					t.Errorf("body = %s, want ticket.bad_transition", rec.Body)
+				// Closing a resolved ticket, or saving the same status, keeps the resolution time.
+				if keep := from == to || (from == models.StatusResolved && to == models.StatusClosed); keep && old != nil &&
+					(got.ResolvedAt == nil || !got.ResolvedAt.Equal(*old)) {
+					t.Errorf("resolved_at = %v, want kept %v", got.ResolvedAt, old)
 				}
-				if got.Status != wantStatus {
-					t.Errorf("status = %s, want %s", got.Status, wantStatus)
-				}
-				if (got.ResolvedAt != nil) != wantResolved {
-					t.Errorf("resolved_at = %v, want set = %v", got.ResolvedAt, wantResolved)
-				}
-				if !ok {
+				if from == to {
 					if len(audits) != 0 {
-						t.Errorf("rejected change wrote %d audit rows", len(audits))
+						t.Errorf("unchanged status wrote %d audit rows", len(audits))
 					}
 					return
 				}
@@ -161,7 +153,6 @@ func TestStaffTriage_FRT3(t *testing.T) {
 		{"category unknown", `{"category_id": 999999999}`, 400, nil},
 		{"mixed, bad priority", `{"status": "in_progress", "priority": "bogus", "category_id": ` + hw + `}`, 400, nil},
 		{"mixed, bad category", `{"status": "in_progress", "priority": "low", "category_id": ` + gone + `}`, 400, nil},
-		{"mixed, bad transition", `{"status": "closed", "priority": "low", "category_id": ` + hw + `}`, 409, nil},
 		{"unknown status", `{"status": "done"}`, 400, nil},
 		{"empty body", `{}`, 400, nil},
 		{"unknown field", `{"assignee_id": 1}`, 400, nil},
