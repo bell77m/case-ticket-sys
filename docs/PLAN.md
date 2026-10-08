@@ -247,9 +247,10 @@ Cluster work (T3.09–T3.16) depends only on the skeleton and Dockerfile, so an 
     - Zawgyi detection and conversion with myanmar-tools; visual check of every page in `my` and `th`.
     - Done when: a Zawgyi sample is saved as Unicode.
     - Status: done. Every JSON write converts Zawgyi to Unicode in `call()` (myanmar-tools 1.1.3, loaded only for Burmese bodies), proven by e2e, and all 11 pages passed a visual check in `my` and `th` at 390px. See [note](notes/T3.08.md).
-- [ ] **T3.09** Cluster host — M · deps: none · ops
-    - Ubuntu Server 24.04 LTS, k3s with `--disable traefik`, ufw (443 users, 6443 admins).
+- [x] **T3.09** Cluster host — M · deps: none · ops
+    - Ubuntu Server 26.04 LTS (the user's choice, 2026-10-07; was 24.04), k3s with `--disable traefik`, ufw (443 users, 6443 admins).
     - Done when: `kubectl get nodes` shows Ready.
+    - Status: done. One run of `deploy/install/install.sh` builds the host and the whole platform (k3s, ufw, NGINX, Vault, Harbor, Kyverno, Argo CD, the app, the first Root Admin and backups), proven end to end in an Ubuntu 26.04 container on 2026-10-08 (node Ready, ticket-prod Synced Healthy); running it on the real server is left to ops ([docs/INSTALL.md](INSTALL.md)). See [note](notes/T3.09.md).
 - [x] **T3.10** NGINX Ingress — M · deps: T3.09 · be + ops · NFR-1, NFR-4, FR-A11
     - F5 NGINX Ingress Controller, company CA certificate, allow/deny for the company network, 100 MB body limit, SSE settings. Access logs must not include the X-Tracking-Token header.
     - Login limit (FR-A11), guest ticket limit (NFR-3) and audit IPs use `clientIP` (backend/internal/api/tickets.go), which is the TCP peer: behind the ingress that is NGINX for everyone. Go change needed: read `X-Forwarded-For` only from the trusted ingress address. Without it the per-IP limit counts every staff member as one IP, and 20 failures lock everyone out for 15 minutes.

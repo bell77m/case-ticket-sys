@@ -38,7 +38,7 @@ Indexes: tickets(status), tickets(created_at), tickets(location_id), trigram ind
 
 ## Deployment
 
-Ubuntu Server 24.04 LTS, k3s (installed with `--disable traefik`). Namespaces: `ticket-staging`, `ticket-prod`.
+Ubuntu Server 26.04 LTS, k3s (installed with `--disable traefik --secrets-encryption`). Namespaces: `ticket-staging`, `ticket-prod`. One run of `deploy/install/install.sh` builds a server: k3s, ufw, the platform pieces below, the app through Argo CD and the first Root Admin (runbook docs/INSTALL.md).
 
 ```mermaid
 flowchart LR
