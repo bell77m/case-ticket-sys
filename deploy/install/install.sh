@@ -398,7 +398,13 @@ jq -r '.ci.secret' "$ROBOTS" | docker login "$H" -u "$(jq -r '.ci.username' "$RO
 tag=sha-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)
 IMAGES=$STATE/images.env
 : >"$IMAGES.tmp"
-digest_of() { docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$1" | grep -m1 "^${1%:*}@" | cut -d@ -f2; }
+# The digest Harbor holds for a pushed tag. Docker's own record can differ: from a multi-platform image it may push
+# only this platform's manifest yet still report the index digest (Docker 29.8.2 did), which Harbor never received.
+digest_of() { # harbor-ref
+	local proj=${1#"$H"/}; proj=${proj%%/*}
+	local repo=${1#"$H/$proj/"}; repo=${repo%:*}
+	api GET "/projects/$proj/repositories/${repo//\//%252F}/artifacts/${1##*:}" | sed '$d' | jq -r '.digest // empty'
+}
 push() { # local-ref harbor-ref key; retried, since Harbor may still be settling after a restart
 	docker tag "$1" "$2"
 	for attempt in 1 2 3; do
@@ -406,7 +412,9 @@ push() { # local-ref harbor-ref key; retried, since Harbor may still be settling
 		[ "$attempt" -lt 3 ] || die "pushing $2 to Harbor failed 3 times"
 		sleep 20
 	done
-	echo "$3=${2%:*}@$(digest_of "$2")" >>"$IMAGES.tmp"
+	local d; d=$(digest_of "$2")
+	[[ $d == sha256:* ]] || die "Harbor has no digest for $2"
+	echo "$3=${2%:*}@$d" >>"$IMAGES.tmp"
 }
 for spec in "ticket-app:Dockerfile" "ticket-migrate:deploy/migrate.Dockerfile" "ticket-backup:deploy/backup.Dockerfile"; do
 	name=${spec%%:*}
@@ -560,6 +568,12 @@ jq -n --arg env "$ENVIRONMENT" --arg ns "$NS" --arg repo "$REPO" --arg rev "$REV
 		kustomize: {images: $images, patches: $patches}},
 		destination: {server: "https://kubernetes.default.svc", namespace: $ns},
 		syncPolicy: ($auto + {syncOptions: ["CreateNamespace=true"]})}}' | k apply -f - >/dev/null
+# A rerun first stops a sync left unfinished by the run before (it may wait for images that have changed since).
+op_idle() { case $(k -n argocd get application "$NS" -o jsonpath='{.status.operationState.phase}') in Running | Terminating) return 1 ;; esac; }
+if ! op_idle; then
+	k -n argocd patch application "$NS" --type merge -p '{"status": {"operationState": {"phase": "Terminating"}}}' >/dev/null
+	wait_for 300 "Argo CD to stop the unfinished sync" op_idle
+fi
 # First sync. Production syncs only when a person asks (its project denies automatic syncs); this run is that ask.
 k -n argocd patch application "$NS" --type merge \
 	-p "$(jq -nc --arg r "$REVISION" '{operation: {initiatedBy: {username: "install.sh"}, sync: {revision: $r}}}')" >/dev/null
