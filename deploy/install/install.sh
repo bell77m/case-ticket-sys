@@ -91,7 +91,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 k() { kubectl "$@"; }
 rnd() { openssl rand -hex "${1:-16}"; }
 json() { jq -r "$1"; }
-fetch() { curl -sSfL --retry 3 -o "$1" "$2"; }
+fetch() { curl -sSfL --retry 5 --retry-all-errors --retry-delay 5 -o "$1" "$2" || die "downloading $2 failed"; } # a link that drops mid-file too
 wait_for() { # seconds description command...
 	local t=$1 d=$2; shift 2
 	for _ in $(seq "$((t / 5))"); do "$@" >/dev/null 2>&1 && return 0; sleep 5; done
