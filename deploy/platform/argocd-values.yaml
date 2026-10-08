@@ -10,6 +10,19 @@ configs:
   cm:
     # Look at Git every minute (default 3 min), so a digest bump from cd.yml reaches staging quickly.
     timeout.reconciliation: 60s
+    # local-path volumes bind only when their first pod starts (WaitForFirstConsumer). Argo CD's default treats a
+    # Pending claim as unfinished, so a first sync from scratch waited forever: the uploads claim is in an earlier wave
+    # than the app that mounts it, and the backup claim waits for the night's first backup. Pending counts as healthy.
+    resource.customizations.health.PersistentVolumeClaim: |
+      hs = {status = "Progressing", message = "waiting for the claim"}
+      if obj.status ~= nil and obj.status.phase == "Bound" then
+        hs.status = "Healthy"; hs.message = "Bound"
+      elseif obj.status ~= nil and obj.status.phase == "Pending" then
+        hs.status = "Healthy"; hs.message = "Pending: binds when its first pod starts"
+      elseif obj.status ~= nil and obj.status.phase == "Lost" then
+        hs.status = "Degraded"; hs.message = "Lost"
+      end
+      return hs
   # Everyone who signs in may look; only role:prod-approver may sync production (the manual release approval), and
   # admin is for setting up only. Approvers are named local accounts, one per person, so Argo CD's log shows who
   # released: their accounts.<name> and "g, <name>, role:prod-approver" lines come from a second values file

@@ -11,7 +11,7 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 name=ticket-install-test
-vols=(ticket-install-test-docker ticket-install-test-rancher ticket-install-test-kubelet)
+vols=(ticket-install-test-docker ticket-install-test-rancher ticket-install-test-kubelet ticket-install-test-containerd)
 if [ "${1:-}" = --down ]; then
 	docker rm -f "$name" >/dev/null 2>&1 || true
 	docker volume rm "${vols[@]}" >/dev/null 2>&1 || true
@@ -27,10 +27,11 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends systemd
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 EOF
-# Docker and k3s data on volumes: overlayfs cannot sit on the container's own overlay root.
+# Docker (its containerd image store too) and k3s data on volumes: overlayfs cannot sit on the container's own
+# overlay root.
 docker run -d --name "$name" --hostname "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
 	--tmpfs /run --tmpfs /run/lock -v "${vols[0]}:/var/lib/docker" -v "${vols[1]}:/var/lib/rancher" \
-	-v "${vols[2]}:/var/lib/kubelet" -p 127.0.0.1:9443:443 ticket-install-test:26.04 >/dev/null
+	-v "${vols[2]}:/var/lib/kubelet" -v "${vols[3]}:/var/lib/containerd" -p 127.0.0.1:9443:443 ticket-install-test:26.04 >/dev/null
 for _ in $(seq 30); do docker exec "$name" systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break; sleep 2; done
 
 work=$(mktemp -d)
@@ -39,7 +40,7 @@ bundle=$(cygpath -m "$work/repo.bundle" 2>/dev/null || echo "$work/repo.bundle")
 git bundle create "$bundle" HEAD >/dev/null 2>&1
 docker cp "$bundle" "$name:/root/repo.bundle"
 docker exec "$name" sh -c 'rm -rf /opt/case-ticket-sys && git clone -q /root/repo.bundle /opt/case-ticket-sys'
-args=(--domain tickets.test.internal --root-admin it-admin)
+args=(--domain tickets.test.internal --root-admin it-admin --small) # --small: Docker's VM has about 7 GiB
 if [ -n "$token" ]; then
 	docker cp "$(cygpath -m "$token" 2>/dev/null || echo "$token")" "$name:/root/gh-token"
 	docker exec "$name" chmod 600 /root/gh-token

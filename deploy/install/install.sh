@@ -18,6 +18,7 @@ umask 077
 
 # ---- versions (the ones proven on the local cluster) --------------------------------------------------------------
 K3S_VERSION=v1.35.5+k3s1
+K3S_INSTALL_SHA256=8598e002e61d658fed7b7542fc6d2c66d8da6eae69e088830105d2ee1ffb6d91 # its install.sh at that tag
 HELM_VERSION=v4.3.0
 COSIGN_VERSION=v2.6.5
 NGINX_CHART=2.7.3
@@ -26,7 +27,13 @@ VSO_CHART=1.6.0
 HARBOR_CHART=1.19.2
 KYVERNO_CHART=3.9.1
 ARGOCD_CHART=10.9.2
-THIRD_PARTY=(postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8)
+# Third-party images by digest: a moved tag cannot slip another image past the signing step. To update one,
+# `crane digest <name:tag>` (or `docker buildx imagetools inspect`) and replace the digest.
+THIRD_PARTY=(
+	postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+	redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+	gotenberg/gotenberg:8@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+)
 
 REPO_DIR=$(cd "$(dirname "$0")/../.." && pwd)
 STATE=/etc/ticket-install # settings, certificates, generated files; root-only
@@ -38,12 +45,15 @@ export PATH=/usr/local/bin:$PATH
 # ---- settings ---------------------------------------------------------------------------------------------------
 DOMAIN='' HARBOR_DOMAIN='' ENVIRONMENT=prod ALLOW_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 ADMIN_CIDRS='' SSH_CIDRS=''
 ROOT_ADMIN=it-admin REPO=git@github.com:bell77m/case-ticket-sys.git REVISION=main GITHUB_TOKEN_FILE=''
-TLS_CERT='' TLS_KEY='' TLS_CA='' NFS=''
+TLS_CERT='' TLS_KEY='' TLS_CA='' NFS='' SMALL=''
 usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; echo "Options: --config FILE, or --domain --harbor-domain --env --allow --admin-cidrs --ssh-cidrs"
-	echo "         --root-admin --repo --revision --github-token-file --tls-cert --tls-key --tls-ca --nfs (see install.env.example)"; exit "${1:-0}"; }
+	echo "         --root-admin --repo --revision --github-token-file --tls-cert --tls-key --tls-ca --nfs, --small for a test box (see install.env.example)"; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
 	case $1 in
-	--config) # shellcheck disable=SC1090
+	--config) # sourced as root: only a root-owned file no one else may write
+		[ -f "$2" ] && [ "$(stat -c %u "$2")" = 0 ] && [ -z "$(find "$2" -perm /022)" ] ||
+			{ echo "--config $2 must be a file owned by root and writable only by root" >&2; exit 1; }
+		# shellcheck disable=SC1090
 		. "$2"; shift 2 ;;
 	--domain) DOMAIN=$2; shift 2 ;;
 	--harbor-domain) HARBOR_DOMAIN=$2; shift 2 ;;
@@ -59,12 +69,15 @@ while [ $# -gt 0 ]; do
 	--tls-key) TLS_KEY=$2; shift 2 ;;
 	--tls-ca) TLS_CA=$2; shift 2 ;;
 	--nfs) NFS=$2; shift 2 ;;
+	--small) SMALL=1; shift ;; # test boxes only (test-in-docker.sh): no image scanner, Kyverno admission only
 	-h | --help) usage 0 ;;
 	*) echo "unknown option $1" >&2; usage 1 ;;
 	esac
 done
 HARBOR_DOMAIN=${HARBOR_DOMAIN:-harbor.$DOMAIN}
-ADMIN_CIDRS=${ADMIN_CIDRS:-$ALLOW_CIDRS}
+# 6443 stays closed unless ADMIN_CIDRS names the admins' networks (kubectl on the server itself always works). SSH
+# defaults to the users' networks; the session running this installer is added in step 2, so it is never cut off.
+SSH_CIDRS=${SSH_CIDRS:-$ALLOW_CIDRS}
 NS=ticket-$ENVIRONMENT
 H=$HARBOR_DOMAIN
 
@@ -85,6 +98,13 @@ wait_for() { # seconds description command...
 	die "timed out after ${t}s waiting for $d"
 }
 csv_json() { jq -Rc 'split(",") | map(gsub(" "; "")) | map(select(length > 0))' <<<"$1"; }
+# A run that was cut off mid-install leaves a Helm release "pending" and every later upgrade refuses. Clear it.
+unstick() { # release namespace
+	case $(helm status "$1" -n "$2" -o json 2>/dev/null | jq -r '.info.status // empty') in
+	pending-install) say "clearing the half-finished install of $1"; helm uninstall "$1" -n "$2" --wait >/dev/null ;;
+	pending-upgrade | pending-rollback) say "rolling back the half-finished upgrade of $1"; helm rollback "$1" -n "$2" --wait >/dev/null ;;
+	esac
+}
 
 # ---- 1. checks --------------------------------------------------------------------------------------------------
 step "1/14 checks"
@@ -93,6 +113,12 @@ step "1/14 checks"
 [[ $DOMAIN =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && $HARBOR_DOMAIN =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "bad domain name"
 [[ $ENVIRONMENT == prod || $ENVIRONMENT == staging ]] || die "--env must be prod or staging (deploy/overlays/<env>)"
 [[ $ROOT_ADMIN =~ ^[a-z0-9._@-]{3,64}$ ]] || die "--root-admin: 3 to 64 of a-z 0-9 . _ - @"
+cidr_re='^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$'
+for c in ${ALLOW_CIDRS//,/ } ${ADMIN_CIDRS//,/ } ${SSH_CIDRS//,/ }; do [[ $c =~ $cidr_re ]] || die "not an IPv4 CIDR: $c"; done
+[ -n "$ALLOW_CIDRS" ] || die "--allow: the users' networks are needed"
+[[ $REPO =~ ^(git@github\.com:|https://github\.com/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?$ ]] || die "--repo: a GitHub repository URL"
+[[ $REVISION =~ ^[A-Za-z0-9._/-]{1,100}$ ]] || die "--revision: a branch, tag or commit"
+[ -z "$NFS" ] || [[ $NFS =~ ^[A-Za-z0-9.-]+:/[A-Za-z0-9/_.-]+$ ]] || die "--nfs: server:/path"
 # shellcheck disable=SC1091
 . /etc/os-release
 [ "$ID" = ubuntu ] || die "this installer supports Ubuntu Server only (found $ID)"
@@ -120,12 +146,15 @@ systemctl enable --now docker >/dev/null
 # kubelet wants no swap. In a container (deploy/install/test-in-docker.sh) the swap is the host's: leave it.
 if systemd-detect-virt --container >/dev/null 2>&1; then say "in a container: swap left to the host"
 else swapoff -a && sed -i -E '/^[^#].*\sswap\s/s/^/# ticket-install: /' /etc/fstab; fi
-# ufw: users reach 80/443 from their networks, admins 6443; pods and services talk freely inside the node. SSH stays
-# open (from --ssh-cidrs when given) before the firewall is switched on, so the session running this is not cut off.
+# ufw: users reach 80/443 from their networks, admins 6443 (only with ADMIN_CIDRS); pods and services talk freely
+# inside the node. SSH from SSH_CIDRS, plus the address this installer's own SSH session comes from, added before the
+# firewall is switched on so that session is never cut off.
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
-if [ -n "$SSH_CIDRS" ]; then for c in ${SSH_CIDRS//,/ }; do ufw allow from "$c" to any port 22 proto tcp >/dev/null; done
-else ufw allow 22/tcp >/dev/null; fi
+for c in ${SSH_CIDRS//,/ }; do ufw allow from "$c" to any port 22 proto tcp >/dev/null; done
+me=${SSH_CLIENT:-}; me=${me%% *} # sudo drops SSH_CLIENT; who -m still names the terminal's origin
+[ -n "$me" ] || me=$(who -m 2>/dev/null | sed -nE 's/.*\(([0-9a-fA-F.:]+)\)$/\1/p')
+[[ $me =~ ^[0-9a-fA-F.:]+$ ]] && ufw allow from "$me" to any port 22 proto tcp >/dev/null && say "SSH allowed from this session ($me)" || true
 for c in ${ALLOW_CIDRS//,/ }; do ufw allow from "$c" to any port 80,443 proto tcp >/dev/null; done
 for c in ${ADMIN_CIDRS//,/ }; do ufw allow from "$c" to any port 6443 proto tcp >/dev/null; done
 ufw allow from 10.42.0.0/16 >/dev/null && ufw allow from 10.43.0.0/16 >/dev/null
@@ -143,6 +172,7 @@ if ! k3s --version 2>/dev/null | grep -qF "${K3S_VERSION}"; then
 	(cd "$tmp" && grep ' k3s$' sums | sha256sum -c --quiet) || die "k3s checksum mismatch"
 	install -m 755 "$tmp/k3s" /usr/local/bin/k3s
 	fetch "$tmp/install.sh" "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh"
+	echo "$K3S_INSTALL_SHA256  $tmp/install.sh" | sha256sum -c --quiet || die "k3s install.sh checksum mismatch"
 	INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION=$K3S_VERSION sh "$tmp/install.sh" server \
 		--disable=traefik --secrets-encryption --write-kubeconfig-mode=600 --tls-san="$DOMAIN" >/dev/null
 fi
@@ -167,7 +197,10 @@ step "4/14 certificates"
 T=$STATE/tls
 mkdir -p "$T"
 if [ ! -s "$T/internal-ca.crt" ]; then # the installation's own CA: always for Vault, and for the web names without --tls-*
+	# Name constraints: the host trusts this CA, so it may only ever vouch for this installation's own names.
 	openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -subj "/CN=ticket $ENVIRONMENT internal CA" \
+		-addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+		-addext "nameConstraints=critical,permitted;DNS:$DOMAIN,permitted;DNS:$H,permitted;DNS:vault,permitted;DNS:vault.svc,permitted;DNS:vault.svc.cluster.local,permitted;DNS:vault-internal,permitted;IP:127.0.0.1/255.255.255.255" \
 		-keyout "$T/internal-ca.key" -out "$T/internal-ca.crt" 2>/dev/null
 fi
 issue() { # name days SAN...
@@ -209,10 +242,13 @@ k -n vault create secret generic vault-tls --from-file=tls.crt="$T/vault.crt" --
 	--from-file=ca.crt="$T/internal-ca.crt" --dry-run=client -o yaml | k apply --server-side -f - >/dev/null
 k -n vault-secrets-operator-system create secret generic vault-ca --from-file=ca.crt="$T/internal-ca.crt" \
 	--dry-run=client -o yaml | k apply --server-side -f - >/dev/null
+unstick nginx-ingress nginx-ingress
 helm upgrade --install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version "$NGINX_CHART" -n nginx-ingress --create-namespace \
 	-f "$REPO_DIR/deploy/platform/nginx-ingress-values.yaml" --wait --timeout 10m >/dev/null
+unstick vault vault
 helm upgrade --install vault hashicorp/vault --version "$VAULT_CHART" -n vault \
 	-f "$REPO_DIR/deploy/platform/vault-values.yaml" >/dev/null
+unstick vault-secrets-operator vault-secrets-operator-system
 helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator --version "$VSO_CHART" \
 	-n vault-secrets-operator-system -f "$REPO_DIR/deploy/platform/vso-values.yaml" --wait --timeout 10m >/dev/null
 
@@ -264,7 +300,8 @@ if [ "$rc" = 0 ]; then
 elif grep -q 'No value found at' <<<"$cur"; then
 	age-keygen -o "$tmp/age" 2>/dev/null
 	recipient=$(age-keygen -y "$tmp/age")
-	jq -Rn --arg id "$(grep '^AGE-SECRET-KEY-' "$tmp/age")" --arg r "$recipient" '{options: {cas: 0}, data: {identity: $id, recipient: $r}}' |
+	# Secrets reach jq through its environment (root-only), never its command line (readable in ps by every user).
+	ID=$(grep '^AGE-SECRET-KEY-' "$tmp/age") R=$recipient jq -n '{options: {cas: 0}, data: {identity: env.ID, recipient: env.R}}' |
 		v write "secret/data/backup/$ENVIRONMENT" - >/dev/null
 	install -m 600 "$tmp/age" /root/ticket-backup-identity.txt
 	shred -u "$tmp/age"
@@ -272,13 +309,11 @@ else die "reading secret/backup/$ENVIRONMENT failed: not making a new backup key
 [[ $recipient == age1* ]] || die "secret/backup/$ENVIRONMENT has no age recipient"
 # App secrets: made once. The database passwords are set when PostgreSQL first starts, so they are never replaced.
 if ! v kv get "secret/ticket/$ENVIRONMENT/app" </dev/null >/dev/null 2>&1; then
-	o=$(rnd) a=$(rnd) r=$(rnd)
-	jq -n --arg o "$o" --arg a "$a" --arg r "$r" --arg b "$recipient" '{options: {cas: 0}, data: {
-		POSTGRES_PASSWORD: $o, TICKET_APP_DB_PASSWORD: $a, REDIS_PASSWORD: $r, BACKUP_AGE_RECIPIENT: $b,
-		DATABASE_URL: "postgres://ticket_app:\($a)@postgres:5432/ticket?sslmode=disable",
-		MIGRATE_DATABASE_URL: "postgres://ticket:\($o)@postgres:5432/ticket?sslmode=disable",
-		REDIS_URL: "redis://:\($r)@redis:6379/0"}}' | v write "secret/data/ticket/$ENVIRONMENT/app" - >/dev/null
-	unset o a r
+	O=$(rnd) A=$(rnd) R=$(rnd) B=$recipient jq -n '{options: {cas: 0}, data: {
+		POSTGRES_PASSWORD: env.O, TICKET_APP_DB_PASSWORD: env.A, REDIS_PASSWORD: env.R, BACKUP_AGE_RECIPIENT: env.B,
+		DATABASE_URL: "postgres://ticket_app:\(env.A)@postgres:5432/ticket?sslmode=disable",
+		MIGRATE_DATABASE_URL: "postgres://ticket:\(env.O)@postgres:5432/ticket?sslmode=disable",
+		REDIS_URL: "redis://:\(env.R)@redis:6379/0"}}' | v write "secret/data/ticket/$ENVIRONMENT/app" - >/dev/null
 fi
 jq -n --rawfile c "$T/web.crt" --rawfile k "$T/web.key" '{data: {"tls.crt": $c, "tls.key": $k}}' |
 	v write "secret/data/ticket/$ENVIRONMENT/tls" - >/dev/null
@@ -287,15 +322,16 @@ say "Vault ready: sealed=$(v0 status -format=json </dev/null | json .sealed)"
 # ---- 7. Harbor --------------------------------------------------------------------------------------------------
 step "7/14 Harbor"
 if [ ! -s "$STATE/harbor-secrets.yaml" ]; then
-	jq -n --arg a "$(rnd 16)" --arg s "$(rnd 8)" --arg c "$(rnd 8)" --arg x "$(rnd 16)" --arg j "$(rnd 8)" --arg g "$(rnd 8)" \
-		--arg gp "$(rnd 16)" --arg d "$(rnd 16)" '{harborAdminPassword: $a, secretKey: $s, core: {secret: $c, xsrfKey: $x},
-		jobservice: {secret: $j}, registry: {secret: $g, credentials: {password: $gp}}, database: {internal: {password: $d}}}' \
+	A=$(rnd 16) S=$(rnd 8) C=$(rnd 8) X=$(rnd 16) J=$(rnd 8) G=$(rnd 8) GP=$(rnd 16) D=$(rnd 16) jq -n '{
+		harborAdminPassword: env.A, secretKey: env.S, core: {secret: env.C, xsrfKey: env.X}, jobservice: {secret: env.J},
+		registry: {secret: env.G, credentials: {password: env.GP}}, database: {internal: {password: env.D}}}' \
 		>"$STATE/harbor-secrets.yaml"
 fi
 k -n harbor create secret tls harbor-tls --cert="$T/web.crt" --key="$T/web.key" --dry-run=client -o yaml |
 	k apply --server-side -f - >/dev/null
+unstick harbor harbor
 helm upgrade --install harbor harbor/harbor --version "$HARBOR_CHART" -n harbor -f "$REPO_DIR/deploy/platform/harbor-values.yaml" \
-	-f "$STATE/harbor-secrets.yaml" --set "expose.ingress.hosts.core=$H" --set "externalURL=https://$H" \
+	-f "$STATE/harbor-secrets.yaml" ${SMALL:+--set trivy.enabled=false} --set "expose.ingress.hosts.core=$H" --set "externalURL=https://$H" \
 	--wait --timeout 20m >/dev/null
 admin=$(json .harborAdminPassword <"$STATE/harbor-secrets.yaml")
 api() { # METHOD PATH [JSON]: body, then the HTTP status on the last line; the password goes to curl on stdin
@@ -331,8 +367,7 @@ ip=$(k -n nginx-ingress get svc nginx-ingress-controller -o jsonpath='{.spec.clu
 printf '%s:53 {\n    hosts {\n        %s %s\n    }\n}\n' "$H" "$ip" "$H" >"$tmp/harbor.server"
 k -n kube-system create configmap coredns-custom --from-file=harbor.server="$tmp/harbor.server" --dry-run=client -o yaml |
 	k apply --server-side -f - >/dev/null
-pull_auth=$(jq -r '.pull | "\(.username):\(.secret)" | @base64' "$ROBOTS")
-jq -n --arg h "$H" --arg a "$pull_auth" '{auths: {($h): {auth: $a}}}' >"$tmp/pull.json"
+jq --arg h "$H" '{auths: {($h): {auth: (.pull | "\(.username):\(.secret)" | @base64)}}}' "$ROBOTS" >"$tmp/pull.json"
 k -n kyverno create secret generic harbor-pull --type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson="$tmp/pull.json" \
 	--dry-run=client -o yaml | k apply --server-side -f - >/dev/null
 # containerd pulls from Harbor as the pull robot and trusts its CA; k3s reads registries.yaml only at start.
@@ -341,7 +376,10 @@ jq -r --arg h "$H" '"configs:\n  \"\($h)\":\n    auth:\n      username: \"\(.pul
 if ! cmp -s "$tmp/registries.yaml" /etc/rancher/k3s/registries.yaml; then
 	install -m 600 "$tmp/registries.yaml" /etc/rancher/k3s/registries.yaml
 	say "restarting k3s so containerd reads registries.yaml (Vault is unsealed again)"
-	systemctl restart k3s
+	# A plain `systemctl restart k3s` keeps the running containers, and the new containerd starts a second copy of each
+	# pod (Vault's Raft file, PostgreSQL's shared memory and ports then clash). k3s-killall.sh stops them all first.
+	/usr/local/bin/k3s-killall.sh >/dev/null 2>&1
+	systemctl start k3s
 	wait_for 300 "the k3s API" k get nodes
 	k wait --for=condition=Ready node --all --timeout=5m >/dev/null
 	unseal
@@ -354,22 +392,32 @@ tag=sha-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)
 IMAGES=$STATE/images.env
 : >"$IMAGES.tmp"
 digest_of() { docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$1" | grep -m1 "^${1%:*}@" | cut -d@ -f2; }
-push() { # local-ref harbor-ref key
-	docker tag "$1" "$2" && docker push -q "$2" >/dev/null
+push() { # local-ref harbor-ref key; retried, since Harbor may still be settling after a restart
+	docker tag "$1" "$2"
+	for attempt in 1 2 3; do
+		docker push -q "$2" >/dev/null && break
+		[ "$attempt" -lt 3 ] || die "pushing $2 to Harbor failed 3 times"
+		sleep 20
+	done
 	echo "$3=${2%:*}@$(digest_of "$2")" >>"$IMAGES.tmp"
 }
 for spec in "ticket-app:Dockerfile" "ticket-migrate:deploy/migrate.Dockerfile" "ticket-backup:deploy/backup.Dockerfile"; do
 	name=${spec%%:*}
 	say "building $name"
-	docker build -q -f "$REPO_DIR/${spec#*:}" -t "$name:$tag" "$REPO_DIR" >/dev/null
+	# Host network: Docker's bridge can drop large downloads (npm, Go modules) where the MTU is smaller (VPN, cloud,
+	# nested Docker); one retry for a mirror's bad moment.
+	docker build -q --network host -f "$REPO_DIR/${spec#*:}" -t "$name:$tag" "$REPO_DIR" >/dev/null ||
+		docker build -q --network host -f "$REPO_DIR/${spec#*:}" -t "$name:$tag" "$REPO_DIR" >/dev/null
 	push "$name:$tag" "$H/ticket/$name:$tag" "$name"
 done
-for img in "${THIRD_PARTY[@]}"; do
-	docker pull -q "$img" >/dev/null
-	case $img in */*) ref=$H/dockerhub/$img ;; *) ref=$H/dockerhub/library/$img ;; esac
-	push "$img" "$ref" "harbor.example.internal/dockerhub/$( [[ $img == */* ]] || echo library/)${img%:*}"
+for img in "${THIRD_PARTY[@]}"; do # name:tag@sha256:...: pulled by digest, pushed to Harbor under name:tag
+	named=${img%@*} repo=${img%%:*}
+	[[ $repo == */* ]] || { named=library/$named repo=library/$repo; }
+	docker pull -q "${img%%:*}@${img#*@}" >/dev/null
+	push "${img%%:*}@${img#*@}" "$H/dockerhub/$named" "harbor.example.internal/dockerhub/$repo"
 done
 mv "$IMAGES.tmp" "$IMAGES"
+docker logout "$H" >/dev/null # the push robot's secret leaves /root/.docker
 # A 15-minute token that may only sign, reaching Vault's ClusterIP (its certificate names vault.vault.svc).
 VAULT_TOKEN=$(v token create -policy=cosign-sign -ttl=15m -field=token </dev/null) \
 	VAULT_ADDR="https://$(k -n vault get svc vault -o jsonpath='{.spec.clusterIP}'):8200" \
@@ -383,15 +431,18 @@ VAULT_TOKEN=$(v token create -policy=cosign-sign -ttl=15m -field=token </dev/nul
 # ---- 9. Kyverno and the policies --------------------------------------------------------------------------------
 step "9/14 Kyverno"
 cat "$T/web-ca.crt" "$T/internal-ca.crt" >"$tmp/kyverno-ca.crt"
+unstick kyverno kyverno
 helm upgrade --install kyverno kyverno/kyverno --version "$KYVERNO_CHART" -n kyverno -f "$REPO_DIR/deploy/platform/kyverno-values.yaml" \
-	--set-file global.caCertificates.data="$tmp/kyverno-ca.crt" --wait --timeout 10m >/dev/null
+	${SMALL:+-f "$REPO_DIR/deploy/local/kyverno-local-values.yaml"} --set-file global.caCertificates.data="$tmp/kyverno-ca.crt" --wait --timeout 10m >/dev/null
 mkdir -p "$STATE/policies"
+# kustomize reads a directory resource only by a relative path (outside its root with LoadRestrictionsNone).
+policies=$(realpath --relative-to="$STATE/policies" "$REPO_DIR/deploy/platform/policies")
 cat >"$STATE/policies/kustomization.yaml" <<EOF
 # Written by deploy/install/install.sh: the policies of deploy/platform/policies with this host's Harbor.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - $REPO_DIR/deploy/platform/policies
+  - $policies
 patches:
   - target: { kind: ValidatingPolicy, name: harbor-images-only }
     patch: '[{"op": "replace", "path": "/spec/variables/0/expression", "value": "''$H/''"}]'
@@ -453,6 +504,7 @@ fi
 
 # ---- 11. Argo CD and repository access -----------------------------------------------------------------------------
 step "11/14 Argo CD"
+unstick argocd argocd
 helm upgrade --install argocd argo/argo-cd --version "$ARGOCD_CHART" -n argocd -f "$REPO_DIR/deploy/platform/argocd-values.yaml" \
 	--wait --timeout 10m >/dev/null
 KEY=$STATE/argocd-deploy-key
@@ -503,7 +555,7 @@ jq -n --arg env "$ENVIRONMENT" --arg ns "$NS" --arg repo "$REPO" --arg rev "$REV
 		syncPolicy: ($auto + {syncOptions: ["CreateNamespace=true"]})}}' | k apply -f - >/dev/null
 # First sync. Production syncs only when a person asks (its project denies automatic syncs); this run is that ask.
 k -n argocd patch application "$NS" --type merge \
-	-p "{\"operation\":{\"initiatedBy\":{\"username\":\"install.sh\"},\"sync\":{\"revision\":\"$REVISION\"}}}" >/dev/null
+	-p "$(jq -nc --arg r "$REVISION" '{operation: {initiatedBy: {username: "install.sh"}, sync: {revision: $r}}}')" >/dev/null
 healthy() { [ "$(k -n argocd get application "$NS" -o jsonpath='{.status.sync.status}/{.status.health.status}')" = Synced/Healthy ]; }
 wait_for 1800 "Argo CD to sync $NS (Synced/Healthy)" healthy
 k -n "$NS" rollout status deploy/ticket-app --timeout=10m >/dev/null
@@ -535,14 +587,16 @@ argo_admin=$(k -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.d
 	echo "            Change it, then delete Secret argocd-initial-admin-secret; add approvers (docs/notes/2026-09-29-argocd-approvers.md)."
 	echo
 	echo "Do now:"
-	echo " 1. DNS: $DOMAIN and $H -> this server's address, for the users' networks ($ALLOW_CIDRS)."
+	echo " 1. DNS: $DOMAIN and $H -> this server's address, for the users' networks ($ALLOW_CIDRS). This server"
+	echo "    itself resolves them through /etc/hosts (lines marked # ticket-install); leave those."
 	[ -n "$TLS_CERT" ] || echo " 2. Self-signed: users' browsers must trust $T/web-ca.crt (company CA files: --tls-cert/--tls-key/--tls-ca)."
 	echo " 3. Vault: $INIT holds the 5 unseal keys and the root token. Give one key to each of 5 people, keep none here,"
 	echo "    and revoke the root token once admins have their own login (vault token revoke). After a reboot Vault is"
 	echo "    sealed: 3 people unseal it (docs/RESTORE.md, Vault)."
 	echo " 4. Backups: /root/ticket-backup-identity.txt is the only copy outside Vault of the key that opens them. Store it"
 	echo "    offline with the unseal keys, then delete the file. $( [ -n "$NFS" ] || echo 'Add --nfs and run again: backups are on this disk.')"
-	echo " 5. Delete this file once the password and the steps above are done: shred -u $SUMMARY"
+	echo " 5. Once the password and the steps above are done: shred -u $SUMMARY $STATE/root-admin.out"
+	echo "    (Harbor's robot accounts never expire: rotate them by deleting their entry in $ROBOTS and running again.)"
 } >"$SUMMARY"
 chmod 600 "$SUMMARY"
 echo

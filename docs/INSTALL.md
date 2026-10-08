@@ -29,9 +29,9 @@ It takes about 30–45 minutes: mostly downloads and building the images. Output
 ## What it does
 
 1. Checks the server; installs packages (Docker, age, ufw …); turns swap off.
-2. Firewall (ufw): 80 and 443 only from `ALLOW_CIDRS`, the Kubernetes API (6443) only from `ADMIN_CIDRS`, SSH from `SSH_CIDRS` or anywhere.
-3. Installs k3s, Helm and cosign, each checked against its published SHA-256.
-4. Certificates: the company ones, or its own CA. Vault always gets a certificate from the installation's own CA.
+2. Firewall (ufw): 80 and 443 only from `ALLOW_CIDRS`; the Kubernetes API (6443) only from `ADMIN_CIDRS`, closed if that is empty; SSH from `SSH_CIDRS` (default `ALLOW_CIDRS`) and from the SSH session running the installer.
+3. Installs k3s, Helm and cosign, each checked against its published SHA-256 (k3s's install script against a hash kept in the installer).
+4. Certificates: the company ones, or its own CA. Vault always gets a certificate from the installation's own CA, which may only sign this installation's names (X.509 name constraints).
 5. NGINX Ingress, Vault and the Vault Secrets Operator.
 6. Vault:
    - initialises it (5 unseal keys, 3 needed) and unseals it;
@@ -65,7 +65,7 @@ The installer writes `/root/ticket-install-summary.txt` (root only). It holds th
 4. **Backup key:** `/root/ticket-backup-identity.txt` is the only copy outside Vault of the key that opens the backups. Store it offline with the unseal keys, then delete the file.
 5. **Argo CD:** change the admin password, delete Secret `argocd-initial-admin-secret`, and add the production approvers (docs/notes/2026-09-29-argocd-approvers.md).
 6. Sign in to the app as the Root Admin and change the password (FR-A8). Then load the real buildings, lines, categories and staff (P.01).
-7. Delete the summary: `shred -u /root/ticket-install-summary.txt`.
+7. Delete the summary and the password file: `shred -u /root/ticket-install-summary.txt /etc/ticket-install/root-admin.out`.
 
 ## Later
 
@@ -74,4 +74,4 @@ The installer writes `/root/ticket-install-summary.txt` (root only). It holds th
   - on prod, an approver presses Sync in Argo CD.
   New images come from CI (docs/notes/T3.15.md: a self-hosted runner on this server, signing through Vault JWT auth). Until that runner is set up, run the installer again to build, sign and deploy the checked-out commit.
 - **Restore:** docs/RESTORE.md.
-- **Trying the installer without a server:** `deploy/install/test-in-docker.sh` runs it in a privileged Ubuntu 26.04 container with systemd (about 6 GiB of Docker memory; stop the local k3d cluster first).
+- **Trying the installer without a server:** `deploy/install/test-in-docker.sh` runs it in a privileged Ubuntu 26.04 container with systemd (about 6 GiB of Docker memory; stop the local k3d cluster first). It passes `--small` (no Harbor scanner, Kyverno's admission controller only); never use that on a real server.
