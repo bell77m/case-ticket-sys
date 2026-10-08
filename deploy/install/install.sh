@@ -344,7 +344,8 @@ api() { # METHOD PATH [JSON]: body, then the HTTP status on the last line; the p
 	printf 'user = "admin:%s"\n' "$admin" | curl -sS -K - -X "$1" -H 'Content-Type: application/json' "${data[@]}" \
 		-w '\n%{http_code}' "https://$H/api/v2.0$2"
 }
-wait_for 600 "Harbor's API" sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' https://$H/api/v2.0/health)\" = 200 ]"
+harbor_ok() { curl -s "https://$H/api/v2.0/health" | jq -e '.status == "healthy"' >/dev/null; }
+wait_for 600 "Harbor's API" harbor_ok
 for p in ticket dockerhub; do
 	c=$(api POST /projects "{\"project_name\":\"$p\",\"metadata\":{\"public\":\"false\",\"auto_scan\":\"true\"}}" | tail -1)
 	case $c in 201 | 409) ;; *) die "create Harbor project $p: HTTP $c" ;; esac
@@ -388,6 +389,7 @@ if ! cmp -s "$tmp/registries.yaml" /etc/rancher/k3s/registries.yaml; then
 	wait_for 300 "the k3s API" k get nodes
 	k wait --for=condition=Ready node --all --timeout=5m >/dev/null
 	unseal
+	wait_for 600 "Harbor after the restart" harbor_ok # its pods restart too; a push before then gets 502
 fi
 
 # ---- 8. images: build, push, sign ---------------------------------------------------------------------------------
