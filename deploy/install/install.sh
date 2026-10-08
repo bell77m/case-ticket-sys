@@ -105,6 +105,16 @@ unstick() { # release namespace
 	pending-upgrade | pending-rollback) say "rolling back the half-finished upgrade of $1"; helm rollback "$1" -n "$2" --wait >/dev/null ;;
 	esac
 }
+# A first install on a slow link can pass a Deployment's 10-minute progress deadline while its images download, and
+# Helm 4 then fails at once. The images are there by then, so one more try finishes.
+chart() { # release namespace helm-args...
+	local r=$1 n=$2; shift 2
+	unstick "$r" "$n"
+	helm upgrade --install "$r" "$@" -n "$n" >/dev/null && return 0
+	say "$r is not ready yet (slow image downloads?): trying once more"
+	unstick "$r" "$n"
+	helm upgrade --install "$r" "$@" -n "$n" >/dev/null
+}
 
 # ---- 1. checks --------------------------------------------------------------------------------------------------
 step "1/14 checks"
@@ -242,15 +252,11 @@ k -n vault create secret generic vault-tls --from-file=tls.crt="$T/vault.crt" --
 	--from-file=ca.crt="$T/internal-ca.crt" --dry-run=client -o yaml | k apply --server-side -f - >/dev/null
 k -n vault-secrets-operator-system create secret generic vault-ca --from-file=ca.crt="$T/internal-ca.crt" \
 	--dry-run=client -o yaml | k apply --server-side -f - >/dev/null
-unstick nginx-ingress nginx-ingress
-helm upgrade --install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version "$NGINX_CHART" -n nginx-ingress --create-namespace \
-	-f "$REPO_DIR/deploy/platform/nginx-ingress-values.yaml" --wait --timeout 10m >/dev/null
-unstick vault vault
-helm upgrade --install vault hashicorp/vault --version "$VAULT_CHART" -n vault \
-	-f "$REPO_DIR/deploy/platform/vault-values.yaml" >/dev/null
-unstick vault-secrets-operator vault-secrets-operator-system
-helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator --version "$VSO_CHART" \
-	-n vault-secrets-operator-system -f "$REPO_DIR/deploy/platform/vso-values.yaml" --wait --timeout 10m >/dev/null
+chart nginx-ingress nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version "$NGINX_CHART" --create-namespace \
+	-f "$REPO_DIR/deploy/platform/nginx-ingress-values.yaml" --wait --timeout 10m
+chart vault vault hashicorp/vault --version "$VAULT_CHART" -f "$REPO_DIR/deploy/platform/vault-values.yaml"
+chart vault-secrets-operator vault-secrets-operator-system hashicorp/vault-secrets-operator --version "$VSO_CHART" \
+	-f "$REPO_DIR/deploy/platform/vso-values.yaml" --wait --timeout 10m
 
 # ---- 6. Vault: init, unseal, audit, auth, policies, secrets --------------------------------------------------------
 step "6/14 Vault"
@@ -329,10 +335,9 @@ if [ ! -s "$STATE/harbor-secrets.yaml" ]; then
 fi
 k -n harbor create secret tls harbor-tls --cert="$T/web.crt" --key="$T/web.key" --dry-run=client -o yaml |
 	k apply --server-side -f - >/dev/null
-unstick harbor harbor
-helm upgrade --install harbor harbor/harbor --version "$HARBOR_CHART" -n harbor -f "$REPO_DIR/deploy/platform/harbor-values.yaml" \
+chart harbor harbor harbor/harbor --version "$HARBOR_CHART" -f "$REPO_DIR/deploy/platform/harbor-values.yaml" \
 	-f "$STATE/harbor-secrets.yaml" ${SMALL:+--set trivy.enabled=false} --set "expose.ingress.hosts.core=$H" --set "externalURL=https://$H" \
-	--wait --timeout 20m >/dev/null
+	--wait --timeout 20m
 admin=$(json .harborAdminPassword <"$STATE/harbor-secrets.yaml")
 api() { # METHOD PATH [JSON]: body, then the HTTP status on the last line; the password goes to curl on stdin
 	local data=(); [ $# -lt 3 ] || data=(-d "$3")
@@ -431,9 +436,8 @@ VAULT_TOKEN=$(v token create -policy=cosign-sign -ttl=15m -field=token </dev/nul
 # ---- 9. Kyverno and the policies --------------------------------------------------------------------------------
 step "9/14 Kyverno"
 cat "$T/web-ca.crt" "$T/internal-ca.crt" >"$tmp/kyverno-ca.crt"
-unstick kyverno kyverno
-helm upgrade --install kyverno kyverno/kyverno --version "$KYVERNO_CHART" -n kyverno -f "$REPO_DIR/deploy/platform/kyverno-values.yaml" \
-	${SMALL:+-f "$REPO_DIR/deploy/local/kyverno-local-values.yaml"} --set-file global.caCertificates.data="$tmp/kyverno-ca.crt" --wait --timeout 10m >/dev/null
+chart kyverno kyverno kyverno/kyverno --version "$KYVERNO_CHART" -f "$REPO_DIR/deploy/platform/kyverno-values.yaml" \
+	${SMALL:+-f "$REPO_DIR/deploy/local/kyverno-local-values.yaml"} --set-file global.caCertificates.data="$tmp/kyverno-ca.crt" --wait --timeout 10m
 mkdir -p "$STATE/policies"
 # kustomize reads a directory resource only by a relative path (outside its root with LoadRestrictionsNone).
 policies=$(realpath --relative-to="$STATE/policies" "$REPO_DIR/deploy/platform/policies")
@@ -504,9 +508,8 @@ fi
 
 # ---- 11. Argo CD and repository access -----------------------------------------------------------------------------
 step "11/14 Argo CD"
-unstick argocd argocd
-helm upgrade --install argocd argo/argo-cd --version "$ARGOCD_CHART" -n argocd -f "$REPO_DIR/deploy/platform/argocd-values.yaml" \
-	--wait --timeout 10m >/dev/null
+chart argocd argocd argo/argo-cd --version "$ARGOCD_CHART" -f "$REPO_DIR/deploy/platform/argocd-values.yaml" \
+	--wait --timeout 10m
 KEY=$STATE/argocd-deploy-key
 [ -s "$KEY" ] || ssh-keygen -q -t ed25519 -N "" -C "argocd $ENVIRONMENT $(hostname)" -f "$KEY"
 git_ok() { GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$STATE/known_hosts" \
