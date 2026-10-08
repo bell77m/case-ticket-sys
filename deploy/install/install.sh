@@ -424,16 +424,18 @@ for img in "${THIRD_PARTY[@]}"; do # name:tag@sha256:...: pulled by digest, push
 	push "${img%%:*}@${img#*@}" "$H/dockerhub/$named" "harbor.example.internal/dockerhub/$repo"
 done
 mv "$IMAGES.tmp" "$IMAGES"
-docker logout "$H" >/dev/null # the push robot's secret leaves /root/.docker
 # A 15-minute token that may only sign, reaching Vault's ClusterIP (its certificate names vault.vault.svc).
 VAULT_TOKEN=$(v token create -policy=cosign-sign -ttl=15m -field=token </dev/null) \
 	VAULT_ADDR="https://$(k -n vault get svc vault -o jsonpath='{.spec.clusterIP}'):8200" \
 	VAULT_TLS_SERVER_NAME=vault.vault.svc VAULT_CACERT="$T/internal-ca.crt" \
 	bash -c 'while IFS="=" read -r _ ref; do
 		cosign verify --key hashivault://cosign --insecure-ignore-tlog "$ref" >/dev/null 2>&1 ||
-			cosign sign --yes --tlog-upload=false --key hashivault://cosign "$ref" >/dev/null 2>&1 || { echo "sign $ref failed" >&2; exit 1; }
+			out=$(cosign sign --yes --tlog-upload=false --key hashivault://cosign "$ref" 2>&1) ||
+			{ echo "sign $ref failed: $(tail -1 <<<"$out")" >&2; exit 1; }
 		echo "   signed $ref"
 	done <"$0"' "$IMAGES"
+# Only now: cosign pushes the signatures with Docker's login. Then the push robot's secret leaves /root/.docker.
+docker logout "$H" >/dev/null
 
 # ---- 9. Kyverno and the policies --------------------------------------------------------------------------------
 step "9/14 Kyverno"
