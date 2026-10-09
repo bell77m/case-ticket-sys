@@ -7,6 +7,9 @@
 # Same defaults in frontend/playwright.config.ts.
 GOTENBERG_URL ?= http://localhost:3000
 PRINT_BASE_URL ?= http://host.docker.internal:5173
+# Upload scan (NFR-5): clamd with the YARA rules in deploy/base/clamav, from docker compose. Same default in
+# frontend/playwright.config.ts.
+CLAMD_ADDR ?= localhost:3310
 export
 
 # Runs the Go API on :8080 and the SvelteKit dev server on :5173 (proxies /api and /healthz).
@@ -154,7 +157,7 @@ deploy/overlays/local/tls/tls.crt:
 
 # Images are built or pulled on the host's Docker (far faster than pulling in-cluster), then pushed to the local
 # Harbor and signed with the Cosign key in Vault (T3.12): Kyverno lets the cluster run nothing else.
-LOCAL_THIRD_PARTY := postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8
+LOCAL_THIRD_PARTY := postgres:16-alpine redis:7-alpine gotenberg/gotenberg:8 clamav/clamav:1.5_base
 cluster-images:
 	docker build -t ticket-app:local .
 	docker build -f deploy/migrate.Dockerfile -t ticket-migrate:local .

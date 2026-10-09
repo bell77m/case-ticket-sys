@@ -64,7 +64,7 @@ func (g *fakeGotenberg) last() (path string, fields map[string]string) {
 // useGotenberg rebuilds e's routes on a Server with the PDF export settings (FR-P4).
 func (e *testEnv) useGotenberg(gotenbergURL, printBaseURL string) {
 	e.mux = http.NewServeMux()
-	(&Server{DB: e.db, UploadDir: e.dir, Sessions: e.sessions, GuestTicketLimit: 1000,
+	(&Server{DB: e.db, UploadDir: e.dir, Sessions: e.sessions, GuestTicketLimit: 1000, ClamdAddr: e.clamd,
 		GotenbergURL: gotenbergURL, PrintBaseURL: printBaseURL}).Routes(e.mux)
 }
 

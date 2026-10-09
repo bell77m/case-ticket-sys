@@ -158,6 +158,8 @@
 				return ev.to === 'internal' ? m.timeline_note({ actor }) : m.timeline_reply({ actor });
 			case 'attachment.added':
 				return m.timeline_attachment({ actor });
+			case 'attachment.rejected':
+				return m.timeline_attachment_rejected({ actor });
 			default:
 				return m.timeline_other({ actor, action: ev.action });
 		}

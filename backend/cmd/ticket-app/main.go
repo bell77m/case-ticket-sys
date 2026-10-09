@@ -110,6 +110,7 @@ func main() {
 		GotenbergURL:     cfg.GotenbergURL,
 		PrintBaseURL:     cfg.PrintBaseURL,
 		TrustedProxies:   cfg.TrustedProxies,
+		ClamdAddr:        cfg.ClamdAddr,
 	}
 	srv := newServer(cfg.HTTPAddr, newMux(app))
 	slog.Info("listening", "addr", cfg.HTTPAddr)

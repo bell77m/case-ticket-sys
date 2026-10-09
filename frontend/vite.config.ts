@@ -2,6 +2,8 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { spawn } from 'node:child_process';
+import { connect } from 'node:net';
 
 const api = 'http://localhost:8080';
 
@@ -14,7 +16,8 @@ export default defineConfig({
 			},
 
 			// SPA: the Go server embeds build/ and serves index.html for unknown paths.
-			adapter: adapter({ fallback: 'index.html' }),
+			// precompress writes .br and .gz copies, which the Go server sends instead of compressing per request.
+			adapter: adapter({ fallback: 'index.html', precompress: true }),
 
 			// CSP (T3.17): the SPA's inline bootstrap script is allowed by its hash, sent as a <meta> tag in the built
 			// index.html. The Go server's header (securityHeaders in main.go) keeps frame-ancestors, object-src, base-uri
@@ -54,6 +57,25 @@ export default defineConfig({
 			apply: 'build',
 			generateBundle(_, bundle) {
 				for (const name of Object.keys(bundle)) if (name.endsWith('.woff')) delete bundle[name];
+			}
+		},
+
+		// `npm run dev` alone left /api with nothing behind it (ECONNREFUSED): start the Go API with `make dev-backend`
+		// (the same settings as `make dev`) when nothing listens on :8080. Under make (MAKELEVEL set), `make dev` starts
+		// it itself; Playwright starts its API before Vite. Ctrl+C stops both, as they share the terminal.
+		{
+			name: 'start-api',
+			apply: 'serve',
+			configureServer() {
+				if (process.env.MAKELEVEL) return;
+				const probe = connect(8080, '127.0.0.1');
+				probe.on('connect', () => probe.destroy());
+				probe.on('error', () => {
+					console.log('Go API not running on :8080, starting it: make dev-backend');
+					spawn('make', ['dev-backend'], { cwd: '..', stdio: 'inherit' }).on('error', (err) =>
+						console.error(`Could not start the Go API (${err.message}). Run make dev-backend in the repo root.`)
+					);
+				});
 			}
 		}
 	],

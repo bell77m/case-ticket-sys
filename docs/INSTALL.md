@@ -44,7 +44,7 @@ It takes about 30–45 minutes: mostly downloads and building the images. Output
    - robot accounts `pull` and `ci`;
    - a nightly rescan;
    - the node's pull login.
-8. Images: builds the app, migration and backup images from the checked-out commit, copies PostgreSQL, Redis and Gotenberg, pushes all to Harbor, and signs each with the Vault key.
+8. Images: builds the app, migration and backup images from the checked-out commit, copies PostgreSQL, Redis, Gotenberg and ClamAV, pushes all to Harbor, and signs each with the Vault key.
 9. Kyverno with the four policies. Outside the platform, the cluster runs only signed images from this Harbor, never as root, and never without CPU and memory limits.
 10. Backup volumes on the NFS export (if given), and Vault's nightly snapshot.
 11. Argo CD, with a read-only deploy key for the repository.

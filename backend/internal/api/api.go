@@ -28,6 +28,8 @@ type Server struct {
 	PrintBaseURL string
 	// TrustedProxies are the ingress CIDRs whose X-Forwarded-For clientIP believes (FR-A11, NFR-3); nil trusts nobody.
 	TrustedProxies []netip.Prefix
+	// ClamdAddr is clamd's host:port; every upload is scanned there before it is kept (NFR-5). Empty refuses uploads.
+	ClamdAddr string
 }
 
 // Routes registers every /api route on mux (an *http.ServeMux; tests pass a recorder to list the routes).

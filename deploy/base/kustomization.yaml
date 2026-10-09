@@ -19,6 +19,7 @@ resources:
   - postgres.yaml
   - redis.yaml
   - gotenberg.yaml
+  - clamav.yaml
   - ingress.yaml
   - networkpolicy.yaml
   - vault.yaml
@@ -33,6 +34,8 @@ images:
     newName: harbor.example.internal/dockerhub/library/redis
   - name: gotenberg/gotenberg
     newName: harbor.example.internal/dockerhub/gotenberg/gotenberg
+  - name: clamav/clamav
+    newName: harbor.example.internal/dockerhub/clamav/clamav
 configMapGenerator:
   # Non-secret app settings (backend/internal/config). HTTP_ADDR (:8080) and GUEST_TICKET_LIMIT (5) keep their defaults.
   - name: ticket-app-config
@@ -41,9 +44,17 @@ configMapGenerator:
       - GOTENBERG_URL=http://gotenberg:3000
       # Gotenberg's Chromium opens the print page through the app's own Service (docs/ARCHITECTURE.md).
       - PRINT_BASE_URL=http://ticket-app:8080
+      # Every upload is scanned with the YARA rules (NFR-5, clamav.yaml).
+      - CLAMD_ADDR=clamav:3310
       # The ingress pods' network (k3s default cluster CIDR): only their X-Forwarded-For is believed, so per-IP limits
       # and audit IPs see the real client (FR-A11, NFR-3). Change it if the cluster uses another pod CIDR.
       - TRUSTED_PROXIES=10.42.0.0/16
   - name: postgres-init
     files:
       - init-app-user.sh
+  # clamd's config and YARA rules (NFR-5); docker-compose.yml mounts the same folder. A changed rule gets a new
+  # ConfigMap name, so clamd restarts with it.
+  - name: clamav-config
+    files:
+      - clamav/clamd.conf
+      - clamav/ticket-uploads.yar

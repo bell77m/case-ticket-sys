@@ -28,6 +28,7 @@ type testEnv struct {
 
 	sessions *auth.Sessions
 	ip       string // client IP for sign-ins; set by newAuthEnv
+	clamd    string // a fake clamd that flags only the EICAR string (TestClamdRules_NFR5 covers the real rules)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -50,12 +51,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	rdb := redis.NewClient(opt)
 	t.Cleanup(func() { _ = rdb.Close() })
-	e := &testEnv{t: t, db: db, mux: http.NewServeMux(), dir: t.TempDir(), sessions: &auth.Sessions{Redis: rdb}}
+	e := &testEnv{t: t, db: db, mux: http.NewServeMux(), dir: t.TempDir(), sessions: &auth.Sessions{Redis: rdb},
+		clamd: fakeClamd(t, flagEICAR)}
 	if err := db.Where("is_active").First(&e.loc).Error; err != nil {
 		t.Fatalf("need a seeded location (make seed): %v", err)
 	}
 	// Tests open many tickets from httptest's one client IP; TestGuestRateLimit_NFR3 covers the real limit.
-	(&Server{DB: db, UploadDir: e.dir, Sessions: e.sessions, GuestTicketLimit: 1000}).Routes(e.mux)
+	(&Server{DB: db, UploadDir: e.dir, Sessions: e.sessions, GuestTicketLimit: 1000, ClamdAddr: e.clamd}).Routes(e.mux)
 	return e
 }
 

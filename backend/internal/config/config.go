@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"strconv"
@@ -26,6 +27,9 @@ type Config struct {
 	// TrustedProxies are the ingress CIDRs whose X-Forwarded-For is believed (FR-A11, NFR-3); TRUSTED_PROXIES,
 	// comma-separated, empty trusts nobody.
 	TrustedProxies []netip.Prefix
+	// ClamdAddr is clamd's host:port (NFR-5): every upload is scanned with the YARA rules in deploy/base/clamav.
+	// Required: there is no switch to store uploads unscanned.
+	ClamdAddr string
 }
 
 // Load reads the config through getenv (os.Getenv in main) and reports every problem at once.
@@ -45,6 +49,7 @@ func Load(getenv func(string) string) (Config, error) {
 		RedisURL:     req("REDIS_URL"),
 		UploadDir:    req("UPLOAD_DIR"),
 		BaseURL:      req("BASE_URL"),
+		ClamdAddr:    req("CLAMD_ADDR"),
 		GotenbergURL: strings.TrimSpace(getenv("GOTENBERG_URL")),
 		PrintBaseURL: strings.TrimSpace(getenv("PRINT_BASE_URL")),
 	}
@@ -82,6 +87,12 @@ func Load(getenv func(string) string) (Config, error) {
 		case u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1":
 			// Session cookies get the Secure flag from an https BASE_URL (NFR-1); plain http is for local development.
 			errs = append(errs, fmt.Errorf("BASE_URL must use https except on localhost, got %q", cfg.BaseURL))
+		}
+	}
+	if cfg.ClamdAddr != "" {
+		host, port, err := net.SplitHostPort(cfg.ClamdAddr)
+		if _, perr := strconv.ParseUint(port, 10, 16); err != nil || perr != nil || host == "" || strings.Contains(host, "/") {
+			errs = append(errs, fmt.Errorf("CLAMD_ADDR must be host:port, got %q", cfg.ClamdAddr))
 		}
 	}
 	// Plain http is fine here: both are reached inside the cluster, never by a browser (NFR-6).

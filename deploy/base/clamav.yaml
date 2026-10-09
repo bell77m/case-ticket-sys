@@ -1,0 +1,82 @@
+# clamd: scans every guest upload with our YARA rules before the app keeps it (NFR-5). Rules and config come from the
+# ConfigMap clamav-config (deploy/base/clamav/); no ClamAV signature database, so no freshclam and no internet access.
+# ClusterIP only; NetworkPolicy clamav-app-only lets only the app pods reach it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clamav
+  labels:
+    app.kubernetes.io/name: clamav
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clamav
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clamav
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clamav
+          image: clamav/clamav:1.5_base
+          # clamd straight away, not the image's /init (that runs freshclam and expects root).
+          command: ["clamd", "--foreground", "--config-file=/etc/ticket-clamav/clamd.conf"]
+          ports:
+            - name: clamd
+              containerPort: 3310
+          # clamd listens only after the rules have loaded.
+          readinessProbe:
+            tcpSocket:
+              port: clamd
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: clamd
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # clamd writes each stream only to /tmp
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ticket-clamav
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: clamav-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi # up to 10 parallel scans of a 100 MB video
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clamav
+  labels:
+    app.kubernetes.io/name: clamav
+spec:
+  selector:
+    app.kubernetes.io/name: clamav
+  ports:
+    - name: clamd
+      port: 3310
+      targetPort: clamd

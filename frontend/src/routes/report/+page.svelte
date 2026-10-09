@@ -25,6 +25,7 @@
 	let errors = $state<Record<string, string>>({});
 	let formError = $state('');
 	let sending = $state(false);
+	// failed: one message per file that did not upload.
 	let result = $state<{ id: number; token: string; uploaded: number; failed: string[] } | null>(null);
 
 	const floors = $derived(building === '' ? [] : buildings[+building].floors);
@@ -83,8 +84,10 @@
 			for (const f of files) {
 				try {
 					await uploadAttachment(t.ticket_id, t.tracking_token, f);
-				} catch {
-					failed.push(f.name);
+				} catch (err) {
+					// NFR-5: the server's scan found a program or script inside the file.
+					const blocked = err instanceof ApiError && err.code === 'file.malicious';
+					failed.push(blocked ? m.err_file_blocked({ name: f.name }) : m.err_upload_failed({ name: f.name }));
 				}
 			}
 			result = { id: t.ticket_id, token: t.tracking_token, uploaded: files.length - failed.length, failed };
@@ -134,8 +137,8 @@
 		{#if result.uploaded > 0}
 			<p>{result.uploaded === 1 ? m.form_file_attached_one() : m.form_files_attached({ count: String(result.uploaded) })}</p>
 		{/if}
-		{#each result.failed as name (name)}
-			<Alert variant="warning">{m.err_upload_failed({ name })}</Alert>
+		{#each result.failed as msg, i (i)}
+			<Alert variant="warning">{msg}</Alert>
 		{/each}
 		<div class="next">
 			<Button onclick={reportAnother}>{m.success_another()}</Button>

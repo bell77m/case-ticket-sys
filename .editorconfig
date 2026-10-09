@@ -1,5 +1,6 @@
 root = true
 
+# Go, Svelte, TypeScript, CSS, shell and Makefile use tabs.
 [*]
 charset = utf-8
 end_of_line = lf
@@ -7,6 +8,14 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = tab
 
-[*.{md,yml,yaml,json}]
+[*.{md,yml,yaml,json,mjs}]
 indent_style = space
 indent_size = 2
+
+# npm and Paraglide write the frontend's JSON with tabs.
+[frontend/**.json]
+indent_style = tab
+
+[{*.sql,Dockerfile,*.Dockerfile}]
+indent_style = space
+indent_size = 4

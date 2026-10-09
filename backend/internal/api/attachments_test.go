@@ -95,6 +95,49 @@ func TestUploadAttachment_FRT1(t *testing.T) {
 	}
 }
 
+// NFR-5: a file the scanner flags is refused, leaves nothing behind and is audited with the rule's name.
+func TestUploadMalicious_NFR5(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.newTicket()
+	bad := append(append(append([]byte{}, jpegHead...), make([]byte, 1000)...), eicar...)
+	rec := e.upload(c.TicketID, c.TrackingToken, "cat.jpg", bad)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "file.malicious") {
+		t.Fatalf("flagged file: %d %s, want 422 file.malicious", rec.Code, rec.Body)
+	}
+	var files int64
+	e.db.Model(&models.Attachment{}).Where("ticket_id = ?", c.TicketID).Count(&files)
+	entries, _ := os.ReadDir(e.dir + "/" + strconv.FormatInt(c.TicketID, 10))
+	if files != 0 || len(entries) != 0 {
+		t.Errorf("attachment rows = %d, files on disk = %d; want none", files, len(entries))
+	}
+	var a models.AuditEntry
+	if err := e.db.Where("ticket_id = ? AND action = 'attachment.rejected'", c.TicketID).First(&a).Error; err != nil {
+		t.Fatalf("no attachment.rejected audit row: %v", err)
+	}
+	if a.ToValue == nil || *a.ToValue != "YARA.Ticket_EICAR_Test.UNOFFICIAL" {
+		t.Errorf("audit to_value = %v, want the signature name", a.ToValue)
+	}
+	if rec := e.upload(c.TicketID, c.TrackingToken, "ok.jpg", jpegHead); rec.Code != http.StatusCreated {
+		t.Errorf("clean file after a refused one: %d %s, want 201", rec.Code, rec.Body)
+	}
+}
+
+// NFR-5: when clamd cannot be reached, nothing is stored unscanned (fail closed).
+func TestUploadScanUnavailable_NFR5(t *testing.T) {
+	e := newTestEnv(t)
+	c := e.newTicket()
+	e.mux = http.NewServeMux()
+	(&Server{DB: e.db, UploadDir: e.dir, Sessions: e.sessions, GuestTicketLimit: 1000, ClamdAddr: deadAddr(t)}).Routes(e.mux)
+	rec := e.upload(c.TicketID, c.TrackingToken, "a.jpg", jpegHead)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "file.scan_unavailable") {
+		t.Errorf("clamd down: %d %s, want 503 file.scan_unavailable", rec.Code, rec.Body)
+	}
+	entries, _ := os.ReadDir(e.dir + "/" + strconv.FormatInt(c.TicketID, 10))
+	if len(entries) != 0 {
+		t.Errorf("files on disk = %d, want none", len(entries))
+	}
+}
+
 // FR-T1: a closed ticket accepts no new evidence.
 func TestUploadToClosedTicket_FRT1(t *testing.T) {
 	e := newTestEnv(t)

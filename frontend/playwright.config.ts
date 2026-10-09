@@ -32,7 +32,7 @@ export default defineConfig({
 	projects: [{ name: 'phone', use: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: false } }],
 	webServer: external ? [] : [
 		// e2e opens about 14 tickets per run from localhost, over the guest limit of 5 per 10 minutes (NFR-3).
-		// PDF export (FR-P4): the Makefile's defaults, which .env.example does not carry.
+		// PDF export (FR-P4) and the upload scan (NFR-5): the Makefile's defaults, which .env.example does not carry.
 		{
 			command: 'go run ./cmd/ticket-app',
 			cwd: '../backend',
@@ -41,7 +41,8 @@ export default defineConfig({
 				...env,
 				GUEST_TICKET_LIMIT: '1000',
 				GOTENBERG_URL: env.GOTENBERG_URL || 'http://localhost:3000',
-				PRINT_BASE_URL: env.PRINT_BASE_URL || 'http://host.docker.internal:5173'
+				PRINT_BASE_URL: env.PRINT_BASE_URL || 'http://host.docker.internal:5173',
+				CLAMD_ADDR: env.CLAMD_ADDR || 'localhost:3310'
 			},
 			reuseExistingServer: true,
 			timeout: 120_000

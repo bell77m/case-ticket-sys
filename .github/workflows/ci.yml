@@ -40,6 +40,7 @@ jobs:
       MIGRATE_DATABASE_URL: postgres://ticket:ticket@localhost:5432/ticket?sslmode=disable
       DATABASE_URL: postgres://ticket_app:ticket_app@localhost:5432/ticket?sslmode=disable
       REDIS_URL: redis://localhost:6379/0
+      CLAMD_ADDR: localhost:3310 # TestClamdRules_NFR5 runs the real YARA rules
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -49,6 +50,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: Start clamd with the YARA rules
+        run: docker compose up -d --wait clamav # same rules, user and read-only root as the cluster
 
       - name: Prepare database (app user, migrations, dev seed)
         run: |
@@ -113,6 +117,9 @@ jobs:
           docker run -d --name gotenberg --add-host host.docker.internal:host-gateway -p 3000:3000 gotenberg/gotenberg:8
           timeout 60 sh -c 'until curl -sf http://localhost:3000/health >/dev/null; do sleep 2; done'
 
+      - name: Start clamd with the YARA rules
+        run: docker compose up -d --wait clamav # same rules, user and read-only root as the cluster
+
       - name: Prepare database (app user, migrations, dev seed)
         run: |
           psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f deploy/dev/init-app-user.sql
@@ -131,7 +138,7 @@ jobs:
         run: |
           set -a; . ./.env.example; set +a
           export BASE_URL=http://localhost:8080 GUEST_TICKET_LIMIT=1000 UPLOAD_DIR="$RUNNER_TEMP/uploads" \
-            GOTENBERG_URL=http://localhost:3000 PRINT_BASE_URL=http://host.docker.internal:8080
+            GOTENBERG_URL=http://localhost:3000 PRINT_BASE_URL=http://host.docker.internal:8080 CLAMD_ADDR=localhost:3310
           mkdir -p "$UPLOAD_DIR"
           nohup backend/bin/ticket-app > "$RUNNER_TEMP/app.log" 2>&1 &
           timeout 60 sh -c 'until curl -sf http://localhost:8080/healthz >/dev/null; do sleep 1; done'

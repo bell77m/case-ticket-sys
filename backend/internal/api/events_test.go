@@ -24,7 +24,7 @@ func (e *testEnv) server() *httptest.Server {
 	e.t.Helper()
 	rdb := redis.NewClient(e.sessions.Redis.Options())
 	mux := http.NewServeMux()
-	(&Server{DB: e.db, UploadDir: e.dir, Sessions: &auth.Sessions{Redis: rdb}, GuestTicketLimit: 1000}).Routes(mux)
+	(&Server{DB: e.db, UploadDir: e.dir, Sessions: &auth.Sessions{Redis: rdb}, GuestTicketLimit: 1000, ClamdAddr: e.clamd}).Routes(mux)
 	srv := httptest.NewServer(mux)
 	e.t.Cleanup(func() {
 		srv.Close()

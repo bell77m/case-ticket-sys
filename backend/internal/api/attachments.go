@@ -141,6 +141,29 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	// NFR-5: the YARA rules look inside the file for programs and scripts. A match is refused and audited; if clamd
+	// cannot answer, the file is not kept either.
+	sig, err := s.scanFile(r.Context(), fullPath)
+	if err != nil || sig != "" {
+		_ = os.Remove(fullPath)
+	}
+	if err != nil {
+		slog.Error("scan upload", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "file.scan_unavailable")
+		return
+	}
+	if sig != "" {
+		slog.Warn("upload refused by scan", "ticket", ticketID, "signature", sig)
+		if err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			return audit.Record(tx, audit.Guest, "attachment.rejected", audit.Change{
+				TicketID: &ticketID, Target: mediaType, To: sig, IP: s.clientIP(r),
+			})
+		}); err != nil {
+			slog.Error("record refused upload", "error", err)
+		}
+		writeError(w, http.StatusUnprocessableEntity, "file.malicious")
+		return
+	}
 
 	a := models.Attachment{TicketID: ticketID, FilePath: filepath.ToSlash(relPath), MediaType: mediaType, SizeBytes: size}
 	err = s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {

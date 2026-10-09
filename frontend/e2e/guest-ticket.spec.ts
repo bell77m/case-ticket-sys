@@ -27,6 +27,27 @@ test('guest submits a ticket with photo and video', async ({ page }) => {
 	await expect(page.getByText('2 files attached')).toBeVisible();
 });
 
+// NFR-5: the server's YARA scan (clamd, deploy/base/clamav) refuses a photo with a PHP web shell inside; the clean
+// photo is kept and the guest is told which file was blocked.
+test('photo with a hidden script is blocked', async ({ page }) => {
+	await page.goto('/report');
+	await page.getByLabel('Your name').fill('Mya Mya');
+	await page.getByLabel('Employee ID').fill('E5005');
+	await page.getByLabel('Building').selectOption({ index: 1 });
+	await page.getByLabel('Floor').selectOption({ index: 1 });
+	await page.getByLabel('Line').selectOption({ index: 1 });
+	await page.getByLabel('What is the problem?').fill('Scanner on line 1 shows an error code.');
+	await page.getByLabel('Add photos or videos').setInputFiles([
+		{ name: 'clean.jpg', mimeType: 'image/jpeg', buffer: jpeg },
+		{ name: 'shell.jpg', mimeType: 'image/jpeg', buffer: Buffer.concat([jpeg, Buffer.from("<?php system($_GET['c']); ?>")]) }
+	]);
+	await page.getByRole('button', { name: 'Submit ticket' }).click();
+
+	await expect(page.getByRole('heading', { name: /Ticket #\d+ created/ })).toBeFocused();
+	await expect(page.getByText('1 file attached')).toBeVisible();
+	await expect(page.getByText('shell.jpg was blocked by the security check.', { exact: false })).toBeVisible();
+});
+
 // The welcome page leads guests to the form; the brand link brings them back.
 test('welcome page opens the form', async ({ page }) => {
 	await page.goto('/');

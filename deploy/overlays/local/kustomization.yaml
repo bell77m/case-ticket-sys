@@ -27,6 +27,8 @@ images:
     newName: harbor.localtest.me/dockerhub/library/redis
   - name: harbor.example.internal/dockerhub/gotenberg/gotenberg
     newName: harbor.localtest.me/dockerhub/gotenberg/gotenberg
+  - name: harbor.example.internal/dockerhub/clamav/clamav
+    newName: harbor.localtest.me/dockerhub/clamav/clamav
 configMapGenerator:
   - name: ticket-app-config
     behavior: merge

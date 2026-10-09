@@ -15,6 +15,7 @@ func valid() map[string]string {
 		"REDIS_URL":    "redis://localhost:6379/0",
 		"UPLOAD_DIR":   "./uploads",
 		"BASE_URL":     "http://localhost:5173",
+		"CLAMD_ADDR":   "localhost:3310",
 	}
 }
 
@@ -47,7 +48,7 @@ func TestLoad_Invalid_NFR7(t *testing.T) {
 		want []string
 	}{
 		{"all missing", func(m map[string]string) { clear(m) },
-			[]string{"DATABASE_URL", "REDIS_URL", "UPLOAD_DIR", "BASE_URL"}},
+			[]string{"DATABASE_URL", "REDIS_URL", "UPLOAD_DIR", "BASE_URL", "CLAMD_ADDR"}},
 		{"one missing", func(m map[string]string) { delete(m, "REDIS_URL") }, []string{"REDIS_URL"}},
 		{"bad base url", func(m map[string]string) { m["BASE_URL"] = "localhost" }, []string{"BASE_URL"}},
 		// Session cookies are Secure only on https (NFR-1); plain http is for localhost development.
@@ -55,6 +56,9 @@ func TestLoad_Invalid_NFR7(t *testing.T) {
 		// NFR-3: the guest ticket limit is a positive integer.
 		{"guest limit not a number", func(m map[string]string) { m["GUEST_TICKET_LIMIT"] = "five" }, []string{"GUEST_TICKET_LIMIT"}},
 		{"guest limit zero", func(m map[string]string) { m["GUEST_TICKET_LIMIT"] = "0" }, []string{"GUEST_TICKET_LIMIT"}},
+		// NFR-5: uploads are scanned by clamd; there is no way to switch that off, so the address is required.
+		{"clamd addr without port", func(m map[string]string) { m["CLAMD_ADDR"] = "clamav" }, []string{"CLAMD_ADDR"}},
+		{"clamd addr as url", func(m map[string]string) { m["CLAMD_ADDR"] = "tcp://clamav:3310" }, []string{"CLAMD_ADDR"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

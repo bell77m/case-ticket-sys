@@ -23,3 +23,22 @@ spec:
               app.kubernetes.io/name: gotenberg
       ports:
         - port: http
+---
+# Only the app sends files to clamd (NFR-5); no other pod can load it with scans. No egress at all: clamd needs no
+# network (no freshclam), so a file that exploits its parsers cannot call out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clamav-app-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: clamav
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-app
+      ports:
+        - port: clamd

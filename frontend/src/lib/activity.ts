@@ -16,6 +16,7 @@ export const actionLabels: Record<string, () => string> = {
 	'ticket.auto_closed': m.activity_action_ticket_auto_closed,
 	'comment.added': m.activity_action_comment_added,
 	'attachment.added': m.activity_action_attachment_added,
+	'attachment.rejected': m.activity_action_attachment_rejected, // detail: the YARA rule's name (NFR-5)
 	'category.created': m.activity_action_category_created,
 	'category.changed': m.activity_action_category_changed,
 	'category.deactivated': m.activity_action_category_deactivated,
