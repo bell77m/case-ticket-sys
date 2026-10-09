@@ -181,7 +181,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.13.2
+          version: v2.14.0
           working-directory: backend
       - name: svelte-check
         working-directory: frontend

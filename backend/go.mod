@@ -1,6 +1,6 @@
 module ticket-app
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/jackc/pgx/v5 v5.11.0
@@ -17,7 +17,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
